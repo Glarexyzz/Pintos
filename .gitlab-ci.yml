@@ -1,0 +1,49 @@
+image: gcc
+
+# Install dependencies
+before_script:
+  - apt-get update --yes
+  - apt-get install --yes make binutils qemu-system time
+
+stages:
+  - build
+  - test
+
+# Build the PintOS utils
+build-pintos:
+  stage: build
+  script:
+    - cd src/utils
+    - make
+    - cd ../../
+    - echo "export PATH=\$PATH:$(pwd)/src/utils" > .env
+  artifacts:
+    paths:
+      - src/utils # Save the compiled PintOS utils
+      - .env      # Save the environment file
+  rules:
+    # Run this job when there is an open MR to master or on commits to branches with an open MR to master
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    - if: '$CI_COMMIT_BRANCH'
+      when: on_success
+      allow_failure: false
+
+# Run the tests for task 0
+test-task-0:
+  stage: test
+  dependencies:
+    - build-pintos
+  script:
+    - source .env    # Load the environment variables
+    - cd src/devices
+    - make
+    - cd build
+    - make check
+  rules:
+    # Run this job when there is an open MR to master or on commits to branches with an open MR to master
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    - if: '$CI_COMMIT_BRANCH'
+      when: on_success
+      allow_failure: false
