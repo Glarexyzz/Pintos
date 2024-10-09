@@ -1,7 +1,6 @@
 #include "devices/timer.h"
 #include <debug.h>
 #include <inttypes.h>
-#include <round.h>
 #include <stdio.h>
 #include "devices/pit.h"
 #include "threads/interrupt.h"
@@ -24,17 +23,27 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/// A list of `sleeping_thread` sorted by the tick at which they can wake,
+/// soonest at the front.
+static struct list sleeping_list;
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+bool thread_wakes_sooner(
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
 timer_init (void) 
 {
+  list_init(&sleeping_list);
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
@@ -84,16 +93,58 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+/**
+ * Determines whether one sleeping thread wakes sooner than another.
+ * @param a The first sleeping thread.
+ * @param b The second sleeping thread.
+ * @param aux (Unused).
+ * @return `true` iff sleeping thread `a` wakes sooner than sleeping thread `b`
+ */
+bool thread_wakes_sooner(
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+) {
+  uint64_t
+  a_wake_time = list_entry(a,
+  struct sleeping_thread, elem)->wake_time;
+  uint64_t
+  b_wake_time = list_entry(b,
+  struct sleeping_thread, elem)->wake_time;
+  return a_wake_time < b_wake_time;
+}
+
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  // Put threads to sleep by adding them to the sleeping list and blocking them
+
+  // Create and initialise the new sleeping thread
+  struct sleeping_thread current_thread;
+  current_thread.thread = thread_current();
+  current_thread.wake_time = timer_ticks() + ticks;
+
+  // `sleeping_list` is shared between a kernel thread (the current thread) and
+  // an interrupt handler, so coordination must be done by disabling interrupts
+
+  intr_disable();
+
+  // Insert the new sleeping thread into the list of sleeping threads,
+  // preserving order
+  list_insert_ordered(
+    &sleeping_list,
+    &current_thread.elem,
+    &thread_wakes_sooner,
+    NULL
+  );
+
+  thread_block();
+
+  intr_enable();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -171,6 +222,28 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+
+  // Wake all sleeping threads which can be woken
+
+  // Interrupts are disabled, we have exclusive access to `sleeping_list`
+  while (
+    !list_empty(&sleeping_list) && // While the list isn't empty
+    list_entry(                    // And the front of the list can be woken
+      list_front(&sleeping_list),
+      struct sleeping_thread,
+      elem
+    )->wake_time <= timer_ticks()
+  ) {
+    // Wake the thread
+    thread_unblock(
+      list_entry(
+        list_pop_front(&sleeping_list),
+        struct sleeping_thread,
+        elem
+      )->thread
+    );
+  }
+
   thread_tick ();
 }
 
