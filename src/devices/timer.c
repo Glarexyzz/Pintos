@@ -105,12 +105,8 @@ bool thread_wakes_sooner(
   const struct list_elem *b,
   void *aux UNUSED
 ) {
-  uint64_t
-  a_wake_time = list_entry(a,
-  struct sleeping_thread, elem)->wake_time;
-  uint64_t
-  b_wake_time = list_entry(b,
-  struct sleeping_thread, elem)->wake_time;
+  uint64_t a_wake_time = list_entry(a, struct sleeping_thread, elem)->wake_time;
+  uint64_t b_wake_time = list_entry(b, struct sleeping_thread, elem)->wake_time;
   return a_wake_time < b_wake_time;
 }
 
@@ -120,6 +116,8 @@ void
 timer_sleep (int64_t ticks) 
 {
   ASSERT (intr_get_level () == INTR_ON);
+
+  if (ticks <= 0) return;
 
   // Put threads to sleep by adding them to the sleeping list and blocking them
 
