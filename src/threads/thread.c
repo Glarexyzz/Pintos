@@ -387,7 +387,7 @@ thread_set_priority (int new_priority)
 
   if (
     !list_empty(&ready_list) &&
-    new_priority <= list_entry(
+    new_priority < list_entry(
       list_back(&ready_list),
       struct thread,
       elem
