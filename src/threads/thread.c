@@ -70,6 +70,11 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool thread_lower_priority(
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -238,6 +243,23 @@ thread_block (void)
   thread_current ()->status = THREAD_BLOCKED;
   schedule ();
 }
+
+/**
+ * Determines whether one thread has a lower priority than another.
+ * @param a The first thread.
+ * @param b The second thread.
+ * @param aux (Unused).
+ * @return `true` iff thread `a` has lower priority than thread `b`
+ */
+static bool thread_lower_priority(
+    const struct list_elem *a,
+    const struct list_elem *b,
+    void *aux UNUSED
+) {
+  uint64_t a_priority = list_entry(a, struct sleeping_thread, elem)->priority;
+  uint64_t b_priority = list_entry(b, struct sleeping_thread, elem)->priority;
+  return a_priority < b_priority;
+};
 
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
