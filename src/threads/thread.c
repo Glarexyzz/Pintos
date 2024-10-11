@@ -256,8 +256,8 @@ static bool thread_lower_priority(
     const struct list_elem *b,
     void *aux UNUSED
 ) {
-  uint64_t a_priority = list_entry(a, struct sleeping_thread, elem)->priority;
-  uint64_t b_priority = list_entry(b, struct sleeping_thread, elem)->priority;
+  uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
+  uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
   return a_priority < b_priority;
 };
 
