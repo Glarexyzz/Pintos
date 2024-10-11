@@ -32,7 +32,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-bool thread_wakes_sooner(
+static bool thread_wakes_sooner(
   const struct list_elem *a,
   const struct list_elem *b,
   void *aux UNUSED
@@ -100,7 +100,7 @@ timer_elapsed (int64_t then)
  * @param aux (Unused).
  * @return `true` iff sleeping thread `a` wakes sooner than sleeping thread `b`
  */
-bool thread_wakes_sooner(
+static bool thread_wakes_sooner(
   const struct list_elem *a,
   const struct list_elem *b,
   void *aux UNUSED
