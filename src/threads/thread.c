@@ -70,6 +70,11 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool thread_lower_priority(
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -239,6 +244,23 @@ thread_block (void)
   schedule ();
 }
 
+/**
+ * Determines whether one thread has a lower priority than another.
+ * @param a The first thread.
+ * @param b The second thread.
+ * @param aux (Unused).
+ * @return `true` iff thread `a` has lower priority than thread `b`
+ */
+static bool thread_lower_priority(
+    const struct list_elem *a,
+    const struct list_elem *b,
+    void *aux UNUSED
+) {
+  uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
+  uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
+  return a_priority < b_priority;
+}
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)
@@ -256,8 +278,13 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
   t->status = THREAD_READY;
+
+  if (thread_current()->priority < t->priority && old_level == INTR_ON) {
+    thread_yield();
+  }
+
   intr_set_level (old_level);
 }
 
@@ -327,7 +354,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered(&ready_list, &cur->elem, &thread_lower_priority, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -350,11 +377,28 @@ thread_foreach (thread_action_func *func, void *aux)
     }
 }
 
-/* Sets the current thread's priority to NEW_PRIORITY. */
+/* Sets the current thread's priority to NEW_PRIORITY.
+   If NEW_PRIORITY is no longer the highest priority, yields. */
 void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+
+  enum intr_level old_level = intr_disable();
+
+  if (
+    old_level == INTR_ON &&
+    !list_empty(&ready_list) &&
+    new_priority < list_entry(
+      list_back(&ready_list),
+      struct thread,
+      elem
+    )->priority
+  ) {
+    thread_yield();
+  }
+
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
@@ -512,7 +556,7 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_entry (list_pop_back (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
