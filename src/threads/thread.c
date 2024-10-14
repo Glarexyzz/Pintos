@@ -387,6 +387,7 @@ thread_set_priority (int new_priority)
   enum intr_level old_level = intr_disable();
 
   if (
+    old_level == INTR_ON &&
     !list_empty(&ready_list) &&
     new_priority < list_entry(
       list_back(&ready_list),
