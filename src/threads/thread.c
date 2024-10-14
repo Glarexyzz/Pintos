@@ -225,10 +225,6 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
-  if (thread_current()->priority < priority) {
-    thread_yield();
-  }
-
   return tid;
 }
 
@@ -263,7 +259,7 @@ static bool thread_lower_priority(
   uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
   uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
   return a_priority < b_priority;
-};
+}
 
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
@@ -284,6 +280,11 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
   t->status = THREAD_READY;
+
+  if (thread_current()->priority < t->priority && old_level == INTR_ON) {
+    thread_yield();
+  }
+
   intr_set_level (old_level);
 }
 
@@ -447,7 +448,7 @@ thread_get_recent_cpu (void)
    ready list.  It is returned by next_thread_to_run() as a
    special case when the ready list is empty. */
 static void
-idle (void *idle_started_ UNUSED) 
+idle (void *idle_started_ UNUSED)
 {
   struct semaphore *idle_started = idle_started_;
   idle_thread = thread_current ();
