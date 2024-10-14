@@ -380,7 +380,7 @@ thread_foreach (thread_action_func *func, void *aux)
 /* Sets the current thread's priority to NEW_PRIORITY.
    If NEW_PRIORITY is no longer the highest priority, yields. */
 void
-thread_set_priority (int new_priority)
+thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
 
@@ -449,7 +449,7 @@ thread_get_recent_cpu (void)
    ready list.  It is returned by next_thread_to_run() as a
    special case when the ready list is empty. */
 static void
-idle (void *idle_started_ UNUSED)
+idle (void *idle_started_ UNUSED) 
 {
   struct semaphore *idle_started = idle_started_;
   idle_thread = thread_current ();
