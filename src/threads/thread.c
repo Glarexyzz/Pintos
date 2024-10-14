@@ -70,7 +70,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static bool thread_lower_priority(
+bool thread_lower_priority(
   const struct list_elem *a,
   const struct list_elem *b,
   void *aux UNUSED
@@ -251,7 +251,7 @@ thread_block (void)
  * @param aux (Unused).
  * @return `true` iff thread `a` has lower priority than thread `b`
  */
-static bool thread_lower_priority(
+ bool thread_lower_priority(
     const struct list_elem *a,
     const struct list_elem *b,
     void *aux UNUSED
