@@ -4,6 +4,7 @@
 #include <random.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/timer.h"
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
@@ -59,6 +60,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-mlfqs". */
 bool thread_mlfqs;
 
+fix_t load_avg;
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -93,6 +96,10 @@ void
 thread_init (void) 
 {
   ASSERT (intr_get_level () == INTR_OFF);
+
+  if (thread_mlfqs) {
+    load_avg = 0;
+  }
 
   lock_init (&tid_lock);
   list_init (&ready_list);
@@ -138,6 +145,14 @@ threads_ready (void)
 void
 thread_tick (void) 
 {
+
+  if (thread_mlfqs && timer_ticks () % TIMER_FREQ == 0) {
+    load_avg = FF_ADD(
+      FI_MUL(FI_DIV(load_avg, 60), 59),
+      FI_DIV(INT_TO_FIX(list_size(&ready_list)), 60)
+    )
+  }
+
   struct thread *t = thread_current ();
 
   /* Update statistics. */
@@ -426,8 +441,8 @@ thread_get_nice (void)
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  ASSERT(thread_mlfqs);
+  return FIX_TO_INT_ROUND(FI_MUL(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
