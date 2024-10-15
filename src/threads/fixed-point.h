@@ -7,6 +7,9 @@ typedef uint32_t fix_t;
 
 #define F 16384 //1<<q, q=14
 
+/// Representation of 1 in fixed-point.
+#define FIX_1 F
+
 /** Convert an integer to a fixed-point number.
  * @param n The integer to convert.
  */

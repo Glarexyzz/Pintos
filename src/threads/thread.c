@@ -78,6 +78,7 @@ static bool thread_lower_priority(
   const struct list_elem *b,
   void *aux UNUSED
 );
+static void update_recent_cpu(struct thread *t, void *aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -110,6 +111,8 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
+  initial_thread->niceness = 0;
+  initial_thread->recent_cpu = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -140,17 +143,30 @@ threads_ready (void)
   return ready_thread_count;
 }
 
+static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
+  fix_t coefficient = FF_DIV(
+    FI_MUL(load_avg, 2),
+    FI_ADD(FI_MUL(load_avg, 2), 1)
+  );
+  t->recent_cpu = FI_ADD(FF_MUL(coefficient, t->recent_cpu), t->niceness);
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
 thread_tick (void) 
 {
 
-  if (thread_mlfqs && timer_ticks () % TIMER_FREQ == 0) {
-    load_avg = FF_ADD(
-      FI_MUL(FI_DIV(load_avg, 60), 59),
-      FI_DIV(INT_TO_FIX(list_size(&ready_list)), 60)
-    )
+  if (thread_mlfqs) {
+    thread_current()->recent_cpu += FIX_1;
+    if (timer_ticks () % TIMER_FREQ == 0) {
+      load_avg = FF_ADD(
+        FI_MUL(FI_DIV(load_avg, 60), 59),
+        FI_DIV(INT_TO_FIX(list_size(&ready_list)), 60)
+      );
+
+      thread_foreach(&update_recent_cpu, NULL);
+    }
   }
 
   struct thread *t = thread_current ();
@@ -197,6 +213,7 @@ tid_t
 thread_create (const char *name, int priority,
                thread_func *function, void *aux) 
 {
+  struct thread *cur = thread_current();
   struct thread *t;
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
@@ -214,6 +231,9 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+
+  t->niceness = cur->niceness;
+  t->recent_cpu = cur->recent_cpu;
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
