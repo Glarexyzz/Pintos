@@ -79,6 +79,7 @@ static bool thread_lower_priority(
   void *aux UNUSED
 );
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
+static void mlfqs_update_priority(struct thread *t, void *aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -151,6 +152,18 @@ static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
   t->recent_cpu = FI_ADD(FF_MUL(coefficient, t->recent_cpu), t->niceness);
 }
 
+static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
+  int priority = FIX_TO_INT_TO_0(
+    FI_SUB(
+      FF_SUB(PRI_MAX, FI_DIV(t->recent_cpu, 4)),
+      t->niceness * 2
+    )
+  );
+  if (priority < PRI_MIN) priority = PRI_MIN;
+  if (priority > PRI_MAX) priority = PRI_MAX;
+  t->priority = (priority);
+}
+
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
 void
@@ -159,13 +172,16 @@ thread_tick (void)
 
   if (thread_mlfqs) {
     thread_current()->recent_cpu += FIX_1;
-    if (timer_ticks () % TIMER_FREQ == 0) {
+    if (timer_ticks() % TIMER_FREQ == 0) {
       load_avg = FF_ADD(
         FI_MUL(FI_DIV(load_avg, 60), 59),
         FI_DIV(INT_TO_FIX(list_size(&ready_list)), 60)
       );
-
       thread_foreach(&update_recent_cpu, NULL);
+    }
+
+    if ((timer_ticks() & 4) == 4) {
+      thread_foreach(&mlfqs_update_priority, NULL);
     }
   }
 
@@ -232,8 +248,13 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
-  t->niceness = cur->niceness;
-  t->recent_cpu = cur->recent_cpu;
+  // Initialise BSD-style scheduling
+  if (thread_mlfqs) {
+    t->niceness = cur->niceness;
+    t->recent_cpu = cur->recent_cpu;
+
+    mlfqs_update_priority(t, NULL);
+  }
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
