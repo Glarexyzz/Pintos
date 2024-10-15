@@ -239,7 +239,6 @@ tid_t
 thread_create (const char *name, int priority,
                thread_func *function, void *aux) 
 {
-  struct thread *cur = thread_current();
   struct thread *t;
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
@@ -257,14 +256,6 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-
-  // Initialise BSD-style scheduling
-  if (thread_mlfqs) {
-    t->niceness = cur->niceness;
-    t->recent_cpu = cur->recent_cpu;
-
-    mlfqs_update_priority(t, NULL);
-  }
 
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
@@ -587,11 +578,23 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
 
+  struct thread *cur = thread_current();
+
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+
+  if (thread_mlfqs) {
+    // Initialise BSD-style scheduling
+    t->niceness = cur->niceness;
+    t->recent_cpu = cur->recent_cpu;
+
+    mlfqs_update_priority(t, NULL);
+  } else {
+    t->priority = priority;
+  }
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
