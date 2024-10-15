@@ -112,8 +112,6 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
-  initial_thread->niceness = 0;
-  initial_thread->recent_cpu = 0;
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -578,7 +576,7 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
 
-  struct thread *cur = thread_current();
+
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;
@@ -587,8 +585,17 @@ init_thread (struct thread *t, const char *name, int priority)
 
   if (thread_mlfqs) {
     // Initialise BSD-style scheduling
-    t->niceness = cur->niceness;
-    t->recent_cpu = cur->recent_cpu;
+
+    if (is_thread(running_thread())) {
+      struct thread *cur = thread_current();
+
+      t->niceness = cur->niceness;
+      t->recent_cpu = cur->recent_cpu;
+    } else {
+      // The main thread is being initialised, so can't inherit from parent
+      t->niceness = 0;
+      t->recent_cpu = 0;
+    }
 
     mlfqs_update_priority(t, NULL);
   } else {
