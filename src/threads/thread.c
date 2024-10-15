@@ -478,6 +478,7 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice)
 {
+  ASSERT(thread_mlfqs);
   thread_current()->niceness = nice;
 }
 
@@ -485,6 +486,7 @@ thread_set_nice (int nice)
 int
 thread_get_nice (void)
 {
+  ASSERT(thread_mlfqs);
   return thread_current()->niceness;
 }
 
