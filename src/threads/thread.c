@@ -144,6 +144,11 @@ threads_ready (void)
   return ready_thread_count;
 }
 
+/**
+ * thread_action_func for updating the recent_cpu of a thread.
+ * @param t The thread that is being updated.
+ * @param aux (Unused)
+ */
 static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
   fix_t coefficient = FF_DIV(
     FI_MUL(load_avg, 2),
@@ -152,6 +157,11 @@ static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
   t->recent_cpu = FI_ADD(FF_MUL(coefficient, t->recent_cpu), t->niceness);
 }
 
+/**
+ * thread_action_func for updating the BSD-style priority of a thread.
+ * @param t The thread that is being updated.
+ * @param aux (Unused)
+ */
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
   int priority = FIX_TO_INT_TO_0(
     FI_SUB(
