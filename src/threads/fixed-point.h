@@ -3,7 +3,7 @@
 
 #include "stdint.h"
 
-typedef uint32_t fix_t;
+typedef int32_t fix_t;
 
 #define F 16384 //1<<q, q=14
 

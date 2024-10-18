@@ -21,9 +21,14 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+#define NUM_QUEUES (PRI_MAX-PRI_MIN+1)
+
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+
+/// Array of queues for mlfqs
+static struct list queues[NUM_QUEUES];
 
 /* List of all processes.  Processes are added to this list
    when they are first scheduled and removed when they exit. */
@@ -100,6 +105,11 @@ thread_init (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   if (thread_mlfqs) {
+    // Initialise MLFQ
+    for (int i = 0; i < NUM_QUEUES; i++) {
+      list_init(&queues[i]);
+    }
+
     load_avg = 0;
   }
 
@@ -137,7 +147,14 @@ size_t
 threads_ready (void)
 {
   enum intr_level old_level = intr_disable ();
-  size_t ready_thread_count = list_size (&ready_list);
+  size_t ready_thread_count = 0;
+  if (thread_mlfqs) {
+    for (int i = 0; i < NUM_QUEUES; i++) {
+      ready_thread_count += list_size (&queues[i]);
+    }
+  } else {
+    ready_thread_count = list_size (&ready_list);
+  }
   intr_set_level (old_level);
   return ready_thread_count;
 }
@@ -178,12 +195,18 @@ void
 thread_tick (void) 
 {
 
+  struct thread *t = thread_current ();
+  bool cur_thread_is_idle = t == idle_thread;
+
   if (thread_mlfqs) {
     thread_current()->recent_cpu += FIX_1;
     if (timer_ticks() % TIMER_FREQ == 0) {
+      size_t num_running_or_ready = threads_ready();
+      if (!cur_thread_is_idle) num_running_or_ready++;
+
       load_avg = FF_ADD(
         FI_MUL(FI_DIV(load_avg, 60), 59),
-        FI_DIV(INT_TO_FIX(list_size(&ready_list)), 60)
+        FI_DIV(INT_TO_FIX(num_running_or_ready), 60)
       );
       thread_foreach(&update_recent_cpu, NULL);
     }
@@ -193,10 +216,9 @@ thread_tick (void)
     }
   }
 
-  struct thread *t = thread_current ();
 
   /* Update statistics. */
-  if (t == idle_thread)
+  if (cur_thread_is_idle)
     idle_ticks++;
 #ifdef USERPROG
   else if (t->pagedir != NULL)
@@ -333,7 +355,17 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
+
+  // Placeholder for the correct ready list to insert thread to.
+  struct list *ready_queue;
+
+  if (thread_mlfqs) {
+    ready_queue = &queues[t->priority - PRI_MIN];
+  } else {
+    ready_queue = &ready_list;
+  }
+
+  list_insert_ordered(ready_queue, &t->elem, &thread_lower_priority, NULL);
   t->status = THREAD_READY;
 
   if (thread_current()->priority < t->priority && old_level == INTR_ON) {
@@ -407,9 +439,17 @@ thread_yield (void)
   
   ASSERT (!intr_context ());
 
+  struct list *ready_queue;
+
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_insert_ordered(&ready_list, &cur->elem, &thread_lower_priority, NULL);
+  if (cur != idle_thread) {
+    if (thread_mlfqs) {
+      ready_queue = &queues[cur->priority - PRI_MIN];
+    } else {
+      ready_queue = &ready_list;
+    }
+    list_insert_ordered(ready_queue, &cur->elem, &thread_lower_priority, NULL);
+  }
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -441,14 +481,24 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level = intr_disable();
 
+  int highest_priority = 0;
+  if (thread_mlfqs) {
+    for (int i = NUM_QUEUES - 1; i > 0; i++) {
+      if (!list_empty(&queues[i])) {
+        highest_priority = i;
+        break;
+      }
+    }
+  } else {
+    if (!list_empty(&ready_list)) {
+      highest_priority = list_entry(list_back(&ready_list), struct thread, elem)->priority;
+    }
+  }
+
   if (
     old_level == INTR_ON &&
-    !list_empty(&ready_list) &&
-    new_priority < list_entry(
-      list_back(&ready_list),
-      struct thread,
-      elem
-    )->priority
+    (threads_ready() > 0) &&
+    new_priority < highest_priority
   ) {
     thread_yield();
   }
@@ -630,10 +680,25 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
-  if (list_empty (&ready_list))
+  struct list *ready_queue;
+
+  if (thread_mlfqs) {
+    ready_queue = &queues[0];
+    for (int i = NUM_QUEUES-1; i > 0; i--) {
+      if (!list_empty(&queues[i])) {
+        ready_queue = &queues[i];
+        break;
+      }
+    }
+
+  } else {
+    ready_queue = &ready_list;
+  }
+
+  if (list_empty (ready_queue))
     return idle_thread;
   else
-    return list_entry (list_pop_back (&ready_list), struct thread, elem);
+    return list_entry (list_pop_back (ready_queue), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
