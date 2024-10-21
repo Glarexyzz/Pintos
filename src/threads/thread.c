@@ -371,16 +371,12 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  // Placeholder for the correct ready list to insert thread to.
-  struct list *ready_queue;
-
   if (thread_mlfqs) {
-    ready_queue = &queues[t->priority - PRI_MIN];
+    list_push_front(&queues[t->priority - PRI_MIN], &t->elem);
   } else {
-    ready_queue = &ready_list;
+    list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
   }
 
-  list_insert_ordered(ready_queue, &t->elem, &thread_lower_priority, NULL);
   t->status = THREAD_READY;
 
   if (thread_current()->priority < t->priority && old_level == INTR_ON) {
@@ -454,16 +450,13 @@ thread_yield (void)
   
   ASSERT (!intr_context ());
 
-  struct list *ready_queue;
-
   old_level = intr_disable ();
   if (cur != idle_thread) {
     if (thread_mlfqs) {
-      ready_queue = &queues[cur->priority - PRI_MIN];
+      list_push_front(&queues[cur->priority - PRI_MIN], &cur->elem);
     } else {
-      ready_queue = &ready_list;
+      list_insert_ordered(&ready_list, &cur->elem, &thread_lower_priority, NULL);
     }
-    list_insert_ordered(ready_queue, &cur->elem, &thread_lower_priority, NULL);
   }
   cur->status = THREAD_READY;
   schedule ();
