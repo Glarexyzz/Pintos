@@ -543,8 +543,9 @@ thread_get_load_avg (void)
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FIX_TO_INT_ROUND(
+    FI_MUL(thread_current()->recent_cpu, 100)
+  );
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
