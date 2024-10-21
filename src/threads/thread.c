@@ -201,7 +201,8 @@ thread_tick (void)
   bool cur_thread_is_idle = t == idle_thread;
 
   if (thread_mlfqs) {
-    thread_current()->recent_cpu += FIX_1;
+    if (!cur_thread_is_idle) thread_current()->recent_cpu += FIX_1;
+
     if (timer_ticks() % TIMER_FREQ == 0) {
       size_t num_running_or_ready = threads_ready();
       if (!cur_thread_is_idle) num_running_or_ready++;
