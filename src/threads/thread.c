@@ -216,6 +216,18 @@ thread_tick (void)
 
     if ((timer_ticks() & 4) == 4) {
       thread_foreach(&mlfqs_update_priority, NULL);
+
+      int highest_priority = 0;
+      for (int i = NUM_QUEUES - 1; i > 0; i++) {
+        if (!list_empty(&queues[i])) {
+          highest_priority = i;
+          break;
+        }
+      }
+
+      if (t->priority < highest_priority) {
+        intr_yield_on_return();
+      }
     }
   }
 
@@ -522,6 +534,19 @@ thread_set_nice (int nice)
 {
   ASSERT(thread_mlfqs);
   thread_current()->niceness = nice;
+  mlfqs_update_priority(thread_current(), NULL);
+
+  int highest_priority = 0;
+  for (int i = NUM_QUEUES - 1; i > 0; i++) {
+    if (!list_empty(&queues[i])) {
+      highest_priority = i;
+      break;
+    }
+  }
+
+  if (thread_current()->priority < highest_priority) {
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's nice value. */
