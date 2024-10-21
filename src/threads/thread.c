@@ -165,11 +165,13 @@ threads_ready (void)
  * @param aux (Unused)
  */
 static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
-  fix_t coefficient = FF_DIV(
-    FI_MUL(load_avg, 2),
-    FI_ADD(FI_MUL(load_avg, 2), 1)
+  t->recent_cpu =  FI_ADD(
+    FF_DIV(
+      FF_MUL(FI_MUL(load_avg, 2), t->recent_cpu),
+      FI_ADD(FI_MUL(load_avg, 2), 1)
+    ),
+    t->niceness
   );
-  t->recent_cpu = FI_ADD(FF_MUL(coefficient, t->recent_cpu), t->niceness);
 }
 
 /**
@@ -180,7 +182,7 @@ static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
   int priority = FIX_TO_INT_TO_0(
     FI_SUB(
-      FF_SUB(PRI_MAX, FI_DIV(t->recent_cpu, 4)),
+      FF_SUB(INT_TO_FIX(PRI_MAX), FI_DIV(t->recent_cpu, 4)),
       t->niceness * 2
     )
   );
@@ -205,7 +207,7 @@ thread_tick (void)
       if (!cur_thread_is_idle) num_running_or_ready++;
 
       load_avg = FF_ADD(
-        FI_MUL(FI_DIV(load_avg, 60), 59),
+        FI_DIV(FI_MUL(load_avg, 59), 60),
         FI_DIV(INT_TO_FIX(num_running_or_ready), 60)
       );
       thread_foreach(&update_recent_cpu, NULL);
