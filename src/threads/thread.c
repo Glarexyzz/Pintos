@@ -393,7 +393,6 @@ thread_set_priority (int new_priority)
   {
     current_thread->priority = new_priority;
   }
-  /*
   else
   {
     if (current_thread->priority == current_thread->original_priority)
@@ -411,8 +410,6 @@ thread_set_priority (int new_priority)
       current_thread->priority = preserved_priority;
     }
   }
-
-   */
   current_thread->original_priority = new_priority;
   thread_yield ();
 
