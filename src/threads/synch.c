@@ -215,19 +215,8 @@ lock_acquire (struct lock *lock)
     while (lock_in_chain != NULL &&
            current_thread->priority > lock_in_chain->max_priority)
     {
-      struct thread *lock_holder = lock_in_chain->holder;
       lock_in_chain->max_priority = current_thread->priority;
-      int max_priority = lock_holder->original_priority;
-      int lock_priority;
-      if (!list_empty (&lock_holder->locks_acquired))
-      {
-        list_sort (&lock_holder->locks_acquired, lock_lower_priority, NULL);
-        lock_priority = list_entry (list_back (&lock_holder->locks_acquired), struct lock, elem)->max_priority;
-        if (lock_priority > max_priority)
-          max_priority = lock_priority;
-      }
-
-      lock_holder->priority = max_priority;
+      thread_update_priority (lock_in_chain->holder);
       lock_in_chain = lock_in_chain->holder->lock_to_wait;
     }
   }
@@ -238,9 +227,11 @@ lock_acquire (struct lock *lock)
   current_thread = thread_current ();
   current_thread->lock_to_wait = NULL;
   lock->max_priority = current_thread->priority;
-  thread_hold_the_lock (lock);
+  list_insert_ordered (&current_thread ->locks_acquired,
+                       &lock->elem,
+                       lock_lower_priority,
+                       NULL);
   lock->holder = current_thread;
-
   intr_set_level (old_level);
 }
 
@@ -276,11 +267,30 @@ lock_release (struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
 
   list_remove (&lock->elem);
-  struct thread *current_thread = thread_current ();
-  current_thread->priority = current_thread->original_priority;
+  thread_update_priority (thread_current ());
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+}
+
+/* Update priority. */
+void
+thread_update_priority (struct thread *t)
+{
+  enum intr_level old_level = intr_disable ();
+  int max_priority = t->original_priority;
+  int lock_priority;
+
+  if (!list_empty (&t->locks_acquired))
+  {
+    list_sort (&t->locks_acquired, lock_lower_priority, NULL);
+    lock_priority = list_entry (list_back (&t->locks_acquired), struct lock, elem)->max_priority;
+    if (lock_priority > max_priority)
+      max_priority = lock_priority;
+  }
+
+  t->priority = max_priority;
+  intr_set_level (old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
