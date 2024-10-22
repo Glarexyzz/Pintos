@@ -205,12 +205,14 @@ lock_acquire (struct lock *lock)
   /* If a thread tries to acquire a lock that already
      hasa owner, this thread will then be blocked*/
   if (lock->holder != NULL &&
-      thread_current () ->priority > lock->holder->priority) {
-    lock->donee_priority = lock->holder->priority;
-    lock->holder->priority = thread_current () ->priority;
-    lock->donee_priority = thread_current () ->priority;
+      thread_current () ->priority > lock->donor_priority) {
+    lock->donor_priority = thread_current () ->priority;
+    if (lock->donor_priority > lock->holder->priority) {
+      lock->holder->priority = lock->donor_priority;
+    }
   }
   sema_down (&lock->semaphore);
+  lock->donor_priority = thread_current () ->priority;
   lock->holder = thread_current ();
 }
 
@@ -245,7 +247,7 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  lock->holder->priority = lock->donee_priority;
+  thread_current () ->priority = thread_current () ->original_priority;
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
