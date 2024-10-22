@@ -236,8 +236,8 @@ lock_acquire (struct lock *lock)
     while (lock_in_chain != NULL &&
            current_thread->priority > lock_in_chain->max_priority)
     {
-      struct donor donor = donor_init (current_thread->priority);
-      donate_priority_to_lock (&donor, lock_in_chain);
+      //struct donor donor = donor_init (current_thread->priority);
+      //donate_priority_to_lock (&donor, lock_in_chain);
 
       lock_in_chain->max_priority = current_thread->priority;
       thread_update_priority (lock_in_chain->holder);
@@ -290,8 +290,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (! list_empty (&lock->donated_priority))
-    list_pop_back (&lock->donated_priority);
+  //if (! list_empty (&lock->donated_priority))
+  //  list_pop_back (&lock->donated_priority);
 
   list_remove (&lock->elem);
   thread_update_priority (thread_current ());
