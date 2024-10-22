@@ -162,6 +162,7 @@ threads_ready (void)
   } else {
     ready_thread_count = list_size (&ready_list);
   }
+
   intr_set_level (old_level);
   return ready_thread_count;
 }
@@ -172,8 +173,8 @@ threads_ready (void)
  * @param aux (Unused)
  */
 static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
-  t->recent_cpu =  FI_ADD(
   // recent_cpu = ((2 * load_avg) / (2 * load_avg  + 1)) * recent_cpu + nice
+  t->recent_cpu = FI_ADD(
     FF_DIV(
       FF_MUL(FI_MUL(load_avg, 2), t->recent_cpu),
       FI_ADD(FI_MUL(load_avg, 2), 1)
@@ -197,7 +198,7 @@ static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
   );
   if (priority < PRI_MIN) priority = PRI_MIN;
   if (priority > PRI_MAX) priority = PRI_MAX;
-  t->priority = (priority);
+  t->priority = priority;
 }
 
 /* Called by the timer interrupt handler at each timer tick.
@@ -214,15 +215,16 @@ thread_tick (void)
     if (!cur_thread_is_idle) thread_current()->recent_cpu += FIX_1;
 
     if (timer_ticks() % TIMER_FREQ == 0) {
-      size_t num_running_or_ready = threads_ready();
-      if (!cur_thread_is_idle) num_running_or_ready++;
       // Update load_avg and recent_cpu for all threads
+      size_t ready_threads = threads_ready();
+      if (!cur_thread_is_idle) ready_threads++;
 
       // load_avg = (59/60) * load_avg + (1/60) * ready_threads
       load_avg = FF_ADD(
         FI_DIV(FI_MUL(load_avg, 59), 60),
-        FI_DIV(INT_TO_FIX(num_running_or_ready), 60)
+        FI_DIV(INT_TO_FIX(ready_threads), 60)
       );
+
       thread_foreach(&update_recent_cpu, NULL);
     }
 
