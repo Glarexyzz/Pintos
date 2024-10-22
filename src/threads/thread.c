@@ -413,11 +413,7 @@ thread_unblock (struct thread *t)
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
 
-  if (thread_mlfqs) {
-    list_push_front(&queues[t->priority - PRI_MIN], &t->elem);
-  } else {
-    list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
-  }
+  ready_list_insert(t);
 
   t->status = THREAD_READY;
 
@@ -494,11 +490,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) {
-    if (thread_mlfqs) {
-      list_push_front(&queues[cur->priority - PRI_MIN], &cur->elem);
-    } else {
-      list_insert_ordered(&ready_list, &cur->elem, &thread_lower_priority, NULL);
-    }
+    ready_list_insert(cur);
   }
   cur->status = THREAD_READY;
   schedule ();
