@@ -83,6 +83,7 @@ static bool thread_lower_priority(
   const struct list_elem *b,
   void *aux UNUSED
 );
+static int ready_thread_highest_priority(void);
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED);
 
@@ -217,15 +218,7 @@ thread_tick (void)
     if ((timer_ticks() & 4) == 4) {
       thread_foreach(&mlfqs_update_priority, NULL);
 
-      int highest_priority = 0;
-      for (int i = NUM_QUEUES - 1; i > 0; i++) {
-        if (!list_empty(&queues[i])) {
-          highest_priority = i;
-          break;
-        }
-      }
-
-      if (t->priority < highest_priority) {
+      if (t->priority < ready_thread_highest_priority()) {
         intr_yield_on_return();
       }
     }
@@ -351,6 +344,37 @@ static bool thread_lower_priority(
   uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
   uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
   return a_priority < b_priority;
+}
+
+/**
+ * @return The highest priority of all ready threads, or PRI_MIN - 1 if no
+ * threads are ready.
+ */
+static int ready_thread_highest_priority() {
+  int highest_priority = PRI_MIN - 1;
+
+  enum intr_level old_level = intr_disable();
+
+  if (thread_mlfqs) {
+    // Take highest priority non-empty queue
+    for (int i = NUM_QUEUES - 1; i > 0; i++) {
+      if (!list_empty(&queues[i])) {
+        highest_priority = i;
+        break;
+      }
+    }
+  } else if (!list_empty(&ready_list)) {
+    // ready_list is sorted, so we take the back
+    highest_priority = list_entry(
+      list_back(&ready_list),
+      struct thread,
+      elem
+    )->priority;
+  }
+
+  intr_set_level(old_level);
+
+  return highest_priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -489,24 +513,9 @@ thread_set_priority (int new_priority)
 
   enum intr_level old_level = intr_disable();
 
-  int highest_priority = 0;
-  if (thread_mlfqs) {
-    for (int i = NUM_QUEUES - 1; i > 0; i++) {
-      if (!list_empty(&queues[i])) {
-        highest_priority = i;
-        break;
-      }
-    }
-  } else {
-    if (!list_empty(&ready_list)) {
-      highest_priority = list_entry(list_back(&ready_list), struct thread, elem)->priority;
-    }
-  }
-
   if (
     old_level == INTR_ON &&
-    (threads_ready() > 0) &&
-    new_priority < highest_priority
+    new_priority < ready_thread_highest_priority()
   ) {
     thread_yield();
   }
@@ -529,15 +538,10 @@ thread_set_nice (int nice)
   thread_current()->niceness = nice;
   mlfqs_update_priority(thread_current(), NULL);
 
-  int highest_priority = 0;
-  for (int i = NUM_QUEUES - 1; i > 0; i++) {
-    if (!list_empty(&queues[i])) {
-      highest_priority = i;
-      break;
-    }
-  }
-
-  if (thread_current()->priority < highest_priority) {
+  if (
+    intr_get_level() == INTR_ON &&
+    thread_current()->priority < ready_thread_highest_priority()
+  ) {
     thread_yield();
   }
 }
