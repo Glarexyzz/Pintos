@@ -211,7 +211,7 @@ lock_acquire (struct lock *lock)
   {
     current_thread = thread_current ();
     current_thread->lock_to_wait = lock;
-    struct lock *lock_in_chain = lock;
+    lock_in_chain = lock;
     while (lock_in_chain != NULL &&
            current_thread->priority > lock_in_chain->max_priority)
     {
@@ -220,7 +220,7 @@ lock_acquire (struct lock *lock)
       lock_in_chain = lock_in_chain->holder->lock_to_wait;
     }
   }
-  sema_down (&lock->semaphore);
+  sema_down (&lock->semaphore); /* where block happens */
 
   enum intr_level old_level = intr_disable ();
 
@@ -284,7 +284,8 @@ thread_update_priority (struct thread *t)
   if (!list_empty (&t->locks_acquired))
   {
     list_sort (&t->locks_acquired, lock_lower_priority, NULL);
-    lock_priority = list_entry (list_back (&t->locks_acquired), struct lock, elem)->max_priority;
+    lock_priority = list_entry (list_back (&t->locks_acquired),
+                               struct lock, elem)->max_priority;
     if (lock_priority > max_priority)
       max_priority = lock_priority;
   }
