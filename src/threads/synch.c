@@ -204,16 +204,44 @@ lock_acquire (struct lock *lock)
 
   /* If a thread tries to acquire a lock that already
      hasa owner, this thread will then be blocked*/
-  if (lock->holder != NULL &&
-      thread_current () ->priority > lock->donor_priority) {
-    lock->donor_priority = thread_current () ->priority;
-    if (lock->donor_priority > lock->holder->priority) {
-      lock->holder->priority = lock->donor_priority;
+  struct thread *current_thread;
+  struct lock *lock_in_chain;
+
+  if (lock->holder != NULL)
+  {
+    current_thread = thread_current ();
+    current_thread->lock_to_wait = lock;
+    struct lock *lock_in_chain = lock;
+    while (lock_in_chain != NULL &&
+           current_thread->priority > lock_in_chain->max_priority)
+    {
+      struct thread *lock_holder = lock_in_chain->holder;
+      lock_in_chain->max_priority = current_thread->priority;
+      int max_priority = lock_holder->original_priority;
+      int lock_priority;
+      if (!list_empty (&lock_holder->locks_acquired))
+      {
+        list_sort (&lock_holder->locks_acquired, lock_lower_priority, NULL);
+        lock_priority = list_entry (list_back (&lock_holder->locks_acquired), struct lock, elem)->max_priority;
+        if (lock_priority > max_priority)
+          max_priority = lock_priority;
+      }
+
+      lock_holder->priority = max_priority;
+      lock_in_chain = lock_in_chain->holder->lock_to_wait;
     }
   }
   sema_down (&lock->semaphore);
-  lock->donor_priority = thread_current () ->priority;
-  lock->holder = thread_current ();
+
+  enum intr_level old_level = intr_disable ();
+
+  current_thread = thread_current ();
+  current_thread->lock_to_wait = NULL;
+  lock->max_priority = current_thread->priority;
+  thread_hold_the_lock (lock);
+  lock->holder = current_thread;
+
+  intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -247,7 +275,10 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  thread_current () ->priority = thread_current () ->original_priority;
+  list_remove (&lock->elem);
+  struct thread *current_thread = thread_current ();
+  current_thread->priority = current_thread->original_priority;
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
