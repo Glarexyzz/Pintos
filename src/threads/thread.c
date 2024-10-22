@@ -386,14 +386,34 @@ thread_set_priority (int new_priority)
   enum intr_level old_level = intr_disable ();
 
   struct thread *current_thread = thread_current ();
-  int old_priority = current_thread->priority;
-  current_thread->original_priority = new_priority;
 
   /* If donee's priority being modified during donation,
      it will only influence the original priority */
-  if (list_empty (&current_thread->locks_acquired) || new_priority > old_priority)
+  if (list_empty (&current_thread->locks_acquired))
+  {
     current_thread->priority = new_priority;
+  }
+  /*
+  else
+  {
+    if (current_thread->priority == current_thread->original_priority)
+    {
+      list_sort (&current_thread->locks_acquired, lock_lower_priority, NULL);
+      struct lock *max_lock = list_entry (list_back (&current_thread->locks_acquired),
+                                          struct lock,
+                                          elem);
 
+      list_sort (&max_lock->donated_priority, donor_lower_priority, NULL);
+      int preserved_priority = list_entry (
+                                   list_back (&max_lock->donated_priority),
+                                   struct donor,
+                                   elem)->priority;
+      current_thread->priority = preserved_priority;
+    }
+  }
+
+   */
+  current_thread->original_priority = new_priority;
   thread_yield ();
 
   intr_set_level (old_level);
