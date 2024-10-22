@@ -21,6 +21,7 @@
    of thread.h for details. */
 #define THREAD_MAGIC 0xcd6abf4b
 
+/// Number of queues for mlfqs
 #define NUM_QUEUES (PRI_MAX-PRI_MIN+1)
 
 /* List of processes in THREAD_READY state, that is, processes
@@ -65,6 +66,7 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-mlfqs". */
 bool thread_mlfqs;
 
+/// Load average for mlfqs
 fix_t load_avg;
 
 static void kernel_thread (thread_func *, void *aux);
@@ -153,6 +155,7 @@ threads_ready (void)
   enum intr_level old_level = intr_disable ();
 
   if (thread_mlfqs) {
+    // Sum the size of all the queues
     for (int i = 0; i < NUM_QUEUES; i++) {
       ready_thread_count += list_size (&queues[i]);
     }
@@ -170,6 +173,7 @@ threads_ready (void)
  */
 static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
   t->recent_cpu =  FI_ADD(
+  // recent_cpu = ((2 * load_avg) / (2 * load_avg  + 1)) * recent_cpu + nice
     FF_DIV(
       FF_MUL(FI_MUL(load_avg, 2), t->recent_cpu),
       FI_ADD(FI_MUL(load_avg, 2), 1)
@@ -184,6 +188,7 @@ static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
  * @param aux (Unused)
  */
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
+  // priority = PRI_MAX - (recent_cpu / 4) - (nice * 2)
   int priority = FIX_TO_INT_TO_0(
     FI_SUB(
       FF_SUB(INT_TO_FIX(PRI_MAX), FI_DIV(t->recent_cpu, 4)),
@@ -205,12 +210,15 @@ thread_tick (void)
   bool cur_thread_is_idle = t == idle_thread;
 
   if (thread_mlfqs) {
+    // Increment recent_cpu if not idle_thread
     if (!cur_thread_is_idle) thread_current()->recent_cpu += FIX_1;
 
     if (timer_ticks() % TIMER_FREQ == 0) {
       size_t num_running_or_ready = threads_ready();
       if (!cur_thread_is_idle) num_running_or_ready++;
+      // Update load_avg and recent_cpu for all threads
 
+      // load_avg = (59/60) * load_avg + (1/60) * ready_threads
       load_avg = FF_ADD(
         FI_DIV(FI_MUL(load_avg, 59), 60),
         FI_DIV(INT_TO_FIX(num_running_or_ready), 60)
@@ -219,6 +227,7 @@ thread_tick (void)
     }
 
     if ((timer_ticks() & 4) == 4) {
+      // Update priority for all threads
       thread_foreach(&mlfqs_update_priority, NULL);
 
       if (t->priority < ready_thread_highest_priority()) {
@@ -685,6 +694,7 @@ init_thread (struct thread *t, const char *name, int priority)
       t->recent_cpu = 0;
     }
 
+    // Initialise priority
     mlfqs_update_priority(t, NULL);
   } else {
     t->priority = priority;
@@ -718,6 +728,7 @@ alloc_frame (struct thread *t, size_t size)
 static struct thread *
 next_thread_to_run (void) 
 {
+  // The list containing the highest priority thread
   struct list *ready_queue;
 
   if (thread_mlfqs) {
