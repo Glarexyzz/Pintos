@@ -22,13 +22,26 @@ bool sema_lower_priority(
     void *
 );
 
+/* Donated priority list. */
+struct donor
+  {
+    int priority;             /* Priority value. */
+    struct list_elem elem;    /* List element. */
+  };
+
+struct donor donor_init (int);
+bool donor_lower_priority (const struct list_elem *,
+                               const struct list_elem *,
+                               void *);
+
 /* Lock. */
 struct lock 
   {
-    struct thread *holder;      /* Thread holding lock (for debugging). */
-    struct semaphore semaphore; /* Binary semaphore controlling access. */
-    int max_priority;           /* The max priority from donation */
-    struct list_elem elem;      /* List element. */
+    struct thread *holder;           /* Thread holding lock (for debugging). */
+    struct semaphore semaphore;      /* Binary semaphore controlling access. */
+    int max_priority;                /* The max priority from donation */
+    struct list_elem elem;           /* List element. */
+    struct list donated_priority;    /* The list of all priority from donation */
   };
 
 void lock_init (struct lock *);
@@ -36,10 +49,14 @@ void lock_acquire (struct lock *);
 bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
-bool lock_lower_priority (const struct list_elem *,
+bool lock_lower_donor_priority (const struct list_elem *,
                                const struct list_elem *,
                                void *);
+bool lock_lower_priority (const struct list_elem *,
+                          const struct list_elem *,
+                          void *);
 void thread_update_priority (struct thread *t);
+void donate_priority_to_lock (struct donor *, struct lock *);
 
 
 /* Condition variable. */
