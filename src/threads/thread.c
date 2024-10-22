@@ -241,6 +241,7 @@ thread_block (void)
   ASSERT (intr_get_level () == INTR_OFF);
 
   thread_current ()->status = THREAD_BLOCKED;
+  list_sort(&ready_list, thread_lower_priority, NULL);
   schedule ();
 }
 
