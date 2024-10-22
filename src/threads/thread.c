@@ -148,8 +148,10 @@ thread_start (void)
 size_t
 threads_ready (void)
 {
-  enum intr_level old_level = intr_disable ();
   size_t ready_thread_count = 0;
+
+  enum intr_level old_level = intr_disable ();
+
   if (thread_mlfqs) {
     for (int i = 0; i < NUM_QUEUES; i++) {
       ready_thread_count += list_size (&queues[i]);
