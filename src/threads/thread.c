@@ -383,23 +383,22 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  enum intr_level old_level = intr_disable ();
 
-  enum intr_level old_level = intr_disable();
+  struct thread *current_thread = thread_current ();
+  int old_priority = current_thread->priority;
+  current_thread->original_priority = new_priority;
 
-  if (
-    old_level == INTR_ON &&
-    !list_empty(&ready_list) &&
-    new_priority < list_entry(
-      list_back(&ready_list),
-      struct thread,
-      elem
-    )->priority
-  ) {
-    thread_yield();
-  }
+  /* If donee's priority being modified during donation,
+     it will only influence the original priority */
+  if (list_empty (&current_thread->locks_acquired) || new_priority > old_priority)
+    current_thread->priority = new_priority;
 
-  intr_set_level(old_level);
+  thread_yield ();
+
+  intr_set_level (old_level);
+
+
 }
 
 /* Returns the current thread's priority. */
