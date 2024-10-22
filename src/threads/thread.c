@@ -84,6 +84,7 @@ static bool thread_lower_priority(
   void *aux UNUSED
 );
 static int ready_thread_highest_priority(void);
+static void ready_list_insert(struct thread *t);
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED);
 
@@ -375,6 +376,23 @@ static int ready_thread_highest_priority() {
   intr_set_level(old_level);
 
   return highest_priority;
+}
+
+/**
+ * Inserts a thread into the ready_list or the appropriate MLFQ depending on
+ * the value of thread_mlfqs.
+ * @param t The thread to be inserted.
+ * @pre Interrupts are disabled.
+ */
+static void ready_list_insert(struct thread *t) {
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  if (thread_mlfqs) {
+    // Maintain RR behaviour
+    list_push_front(&queues[t->priority - PRI_MIN], &t->elem);
+  } else {
+    list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
+  }
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
