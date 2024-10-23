@@ -198,7 +198,19 @@ static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
   );
   if (priority < PRI_MIN) priority = PRI_MIN;
   if (priority > PRI_MAX) priority = PRI_MAX;
-  t->priority = priority;
+
+  // move the thread to the correct queue if its priority changes
+  if (t->status == THREAD_READY && priority != t->priority) {
+    list_remove(&t->elem);
+    t->priority = priority;
+
+    enum intr_level old_level = intr_disable();
+    list_push_front(&queues[priority - PRI_MIN], &t->elem);
+    intr_set_level(old_level);
+
+  } else {
+    t->priority = priority;
+  }
 }
 
 /* Called by the timer interrupt handler at each timer tick.
