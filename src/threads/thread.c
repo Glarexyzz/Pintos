@@ -383,7 +383,7 @@ static int ready_thread_highest_priority() {
 
   if (thread_mlfqs) {
     // Take highest priority non-empty queue
-    for (int i = NUM_QUEUES - 1; i > 0; i++) {
+    for (int i = NUM_QUEUES - 1; i >= 0; i--) {
       if (!list_empty(&queues[i])) {
         highest_priority = i;
         break;
@@ -747,7 +747,7 @@ next_thread_to_run (void)
 
   if (thread_mlfqs) {
     ready_queue = &queues[0];
-    for (int i = NUM_QUEUES-1; i > 0; i--) {
+    for (int i = NUM_QUEUES-1; i >= 0; i--) {
       if (!list_empty(&queues[i])) {
         ready_queue = &queues[i];
         break;
