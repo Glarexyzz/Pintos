@@ -35,6 +35,9 @@ static struct list queues[NUM_QUEUES];
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/// List of all processes that need their priority updated.
+static struct list update_pri_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -87,6 +90,7 @@ static bool thread_lower_priority(
 );
 static int ready_thread_highest_priority(void);
 static void ready_list_insert(struct thread *t);
+static void push_to_update_pri_list(struct thread *t);
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
 static void mlfqs_update_priority(struct thread *t, void *aux UNUSED);
 
@@ -120,6 +124,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&update_pri_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -168,6 +173,17 @@ threads_ready (void)
 }
 
 /**
+ * Add a thread to update_pri_list if it's not already in the list.
+ * @param t The thread to add.
+ */
+static void push_to_update_pri_list(struct thread *t) {
+  // only push if it's not already in the list
+  if (t->update_pri_elem.next == NULL && t->update_pri_elem.prev == NULL) {
+    list_push_front(&update_pri_list, &t->update_pri_elem);
+  }
+}
+
+/**
  * thread_action_func for updating the recent_cpu of a thread.
  * @param t The thread that is being updated.
  * @param aux (Unused)
@@ -181,6 +197,7 @@ static void update_recent_cpu(struct thread *t, void *aux UNUSED) {
     ),
     t->niceness
   );
+  push_to_update_pri_list(t);
 }
 
 /**
@@ -224,7 +241,10 @@ thread_tick (void)
 
   if (thread_mlfqs) {
     // Increment recent_cpu if not idle_thread
-    if (!cur_thread_is_idle) thread_current()->recent_cpu += FIX_1;
+    if (!cur_thread_is_idle) {
+      t->recent_cpu += FIX_1;
+      push_to_update_pri_list(t);
+    }
 
     if (timer_ticks() % TIMER_FREQ == 0) {
       // Update load_avg and recent_cpu for all threads
@@ -241,8 +261,26 @@ thread_tick (void)
     }
 
     if ((timer_ticks() & 4) == 4) {
-      // Update priority for all threads
-      thread_foreach(&mlfqs_update_priority, NULL);
+      // Update priority for all threads which need it
+      struct list_elem *cur_elem = list_begin(&update_pri_list);
+      while (cur_elem != list_end(&update_pri_list)) {
+        struct thread *cur_thread = list_entry(
+          cur_elem,
+          struct thread,
+          update_pri_elem
+        );
+        mlfqs_update_priority(cur_thread, NULL);
+
+        struct list_elem *next_elem = cur_elem->next;
+
+        enum intr_level old_level = intr_disable();
+        list_remove(cur_elem);
+        intr_set_level(old_level);
+        cur_elem->next = NULL;
+        cur_elem->prev = NULL;
+
+        cur_elem = next_elem;
+      }
 
       if (t->priority < ready_thread_highest_priority()) {
         intr_yield_on_return();
@@ -498,7 +536,17 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   intr_disable ();
   list_remove (&thread_current()->allelem);
-  thread_current ()->status = THREAD_DYING;
+  struct thread *current_thread = thread_current();
+  current_thread->status = THREAD_DYING;
+
+  // Remove thread from the update_pri_elem list if possible
+  if (
+    current_thread->update_pri_elem.prev != NULL &&
+    current_thread->update_pri_elem.next != NULL
+  ) {
+    list_remove(&current_thread->update_pri_elem);
+  }
+
   schedule ();
   NOT_REACHED ();
 }

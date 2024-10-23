@@ -93,6 +93,8 @@ struct thread
     int niceness;                       /* Niceness. */
     fix_t recent_cpu;                   /* Recent CPU */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem update_pri_elem;   /* List element for update priority
+                                           list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
