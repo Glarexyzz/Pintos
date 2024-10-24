@@ -4,6 +4,8 @@
 #include <list.h>
 #include <stdbool.h>
 
+#define MAX_DEPTH 8
+
 /* A counting semaphore. */
 struct semaphore 
   {

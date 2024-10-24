@@ -334,9 +334,76 @@ lock_release (struct lock *lock)
   sema_up (&lock->semaphore);
 }
 
-/* Update priority. */
-void
-thread_update_priority (struct thread *t)
+static void
+lock_update_lower_max_priority (struct lock *lock)
+{
+  int max_priority = PRI_MIN;
+  struct list_elem *maximal_elem;
+  if (!list_empty (lock_donors (lock))) {
+    maximal_elem = list_max (lock_donors (lock), thread_lower_priority, NULL);
+    ASSERT (maximal_elem != list_end (lock_donors (lock)));
+    max_priority = list_entry (maximal_elem, struct thread, elem)->priority;
+  }
+  lock->max_priority = max_priority;
+}
+
+static void
+thread_update_lower_donation (struct thread *donee)
+{
+  if (!list_empty (&donee->locks_acquired)) {
+    struct list_elem *maximal_lock_elem = list_max (
+      &donee->locks_acquired,
+      lock_lower_priority,
+      NULL
+    );
+    int maximum_priority = list_entry (
+      maximal_lock_elem,
+      struct lock,
+      elem
+    )->max_priority;
+    /* Reset the thread's priority to this maximum,
+       if it is greater than the default. */
+    donee->priority = donee->original_priority;
+    if (maximum_priority > donee->priority)
+      donee->priority = maximum_priority;
+  } else {
+    /* There are no locks, so set the thread's priority to the default. */
+    donee->priority = donee->original_priority;
+  }
+}
+
+/**
+ * Revokes the donation from thread DONOR to the current thread, updating the
+ * maximum priority from donation in all lock owners it donates to.
+ * When this function is called, DONOR is the thread that was previously in
+ * the list of waiters held by the LOCK and had the highest effective priority.
+ * The top-level call has the lock just released by the current thread,
+ * and if the DONOR has a higher priority than it, the DONOR will preempt the
+ * running thread.
+ * Recursive calls will update the donation from any locks the donee is waiting
+ * for.
+ * @param lock the lock from which DONOR was previously waiting.
+ * @param donor the thread that has been unblocked by the LOCK's semaphore.
+ */
+static void
+lock_revoke_donation (struct lock *lock, struct thread *donor, int max_depth)
+{
+  if (max_depth <= 0 || lock == NULL)
+    return;
+  /* Update the maximum priority of the waiter list. */
+  lock_update_lower_max_priority (lock);
+  ASSERT (lock->max_priority <= donor->priority);
+  /* Update the priority of the lock's owner; if the owner is NULL, then this
+     means the lock was just now released by the current thread. */
+  struct thread *donee = lock->holder;
+  if (donee == NULL)
+    donee = thread_current();
+  /* Revoke the donation on the donee's side by finding the new maximum
+     priority across all locks owned by the donee's thread. */
+  thread_update_lower_donation (donee);
+  /* Recurse up the tree of locks to revoke the donation up to the depth. */
+  lock_revoke_donation (donee->lock_to_wait, donee, max_depth - 1);
+}
 
 static void
 lock_add_donation (struct lock *lock, struct thread *donor, int max_depth)
@@ -359,21 +426,22 @@ lock_add_donation (struct lock *lock, struct thread *donor, int max_depth)
   /* Recurse up the tree of locks to revoke the donation up to the depth. */
   lock_add_donation (donee->lock_to_wait, donee, max_depth - 1);
 }
+
+void thread_update_priority
+(int priority)
 {
   enum intr_level old_level = intr_disable ();
-  int max_priority = t->original_priority;
-  int lock_priority;
-
-  if (!list_empty (&t->locks_acquired))
-  {
-    list_sort (&t->locks_acquired, lock_lower_priority, NULL);
-    lock_priority = list_entry (list_back (&t->locks_acquired),
-                               struct lock, elem)->max_priority;
-    if (lock_priority > max_priority)
-      max_priority = lock_priority;
+  struct thread *current_thread = thread_current ();
+  int prev_priority = current_thread->priority;
+  struct lock *lock_to_wait = current_thread->lock_to_wait;
+  /* Update any existing lock's donation values. */
+  current_thread->priority = priority;
+  if (prev_priority < priority) {
+    lock_add_donation (lock_to_wait, current_thread, MAX_DEPTH);
   }
-
-  t->priority = max_priority;
+  else if (prev_priority > priority) {
+    lock_revoke_donation (lock_to_wait, current_thread, MAX_DEPTH);
+  }
   intr_set_level (old_level);
 }
 
