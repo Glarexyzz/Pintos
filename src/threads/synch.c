@@ -438,7 +438,7 @@ struct semaphore_elem
  * @param aux (Unused).
  * @return `true` iff thread `a` has lower priority than thread `b`
  */
-bool sema_lower_priority(
+static bool sema_lower_priority(
     const struct list_elem *a,
     const struct list_elem *b,
     void *aux UNUSED
