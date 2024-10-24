@@ -119,12 +119,12 @@ thread_init (void)
     }
 
     load_avg = 0;
+    list_init (&update_pri_list);
   }
 
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
-  list_init (&update_pri_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -539,12 +539,14 @@ thread_exit (void)
   struct thread *current_thread = thread_current();
   current_thread->status = THREAD_DYING;
 
-  // Remove thread from the update_pri_elem list if possible
-  if (
-    current_thread->update_pri_elem.prev != NULL &&
-    current_thread->update_pri_elem.next != NULL
-  ) {
-    list_remove(&current_thread->update_pri_elem);
+  if (thread_mlfqs) {
+    // Remove thread from the update_pri_elem list if possible
+    if (
+      current_thread->update_pri_elem.prev != NULL &&
+        current_thread->update_pri_elem.next != NULL
+      ) {
+      list_remove(&current_thread->update_pri_elem);
+    }
   }
 
   schedule ();
