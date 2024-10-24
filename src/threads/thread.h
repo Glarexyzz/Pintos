@@ -91,10 +91,10 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
-    int original_priority;              /* the priority before any donation */
-    struct list locks_acquired;         /* the locks a thread has acquired */
-    struct lock *lock_to_wait;          /* the lock this thread is waiting for */
+    struct list_elem elem;            /* List element. */
+    int original_priority;            /* the priority before any donation */
+    struct list locks_acquired;       /* the locks a thread has acquired */
+    struct lock *lock_to_wait;        /* the lock this thread is waiting for. */
 
 
 #ifdef USERPROG
