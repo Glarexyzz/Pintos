@@ -262,40 +262,31 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+  enum intr_level old_level;
 
   /* If a thread tries to acquire a lock that already
-     hasa owner, this thread will then be blocked*/
+     has an owner, this thread will then be blocked. */
   struct thread *current_thread;
-  struct lock *lock_in_chain;
 
+  /* Set the current thread's lock that it is waiting for early, so that
+     priority donation can be performed immediately when the semaphore is
+     downed. */
   current_thread = thread_current ();
-  if (lock->holder != NULL)
-  {
-    current_thread->lock_to_wait = lock;
-    lock_in_chain = lock;
-    while (lock_in_chain != NULL &&
-           current_thread->priority > lock_in_chain->max_priority)
-    {
-      //struct donor donor = donor_init (current_thread->priority);
-      //donate_priority_to_lock (&donor, lock_in_chain);
+  current_thread->lock_to_wait = lock;
 
-      lock_in_chain->max_priority = current_thread->priority;
-      thread_update_priority (lock_in_chain->holder);
-      lock_in_chain = lock_in_chain->holder->lock_to_wait;
-    }
-  }
   sema_down (&lock->semaphore);
+  ASSERT (lock->semaphore.value == 0);
 
-  enum intr_level old_level = intr_disable ();
-
-  current_thread = thread_current ();
-  current_thread->lock_to_wait = NULL;
-  lock->max_priority = current_thread->priority;
-  list_insert_ordered (&current_thread ->locks_acquired,
-                       &lock->elem,
-                       lock_lower_priority,
-                       NULL);
+  old_level = intr_disable ();
+  /* At this stage, the current thread has not been blocked, so it will become
+     the owner of the lock. */
   lock->holder = current_thread;
+  current_thread->lock_to_wait = NULL;
+  /* Since there are initially no threads waiting for the lock, no donation
+     occurs. */
+  lock->max_priority = PRI_MIN;
+  list_push_back (&current_thread->locks_acquired, &lock->elem);
+
   intr_set_level (old_level);
 }
 
