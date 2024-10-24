@@ -219,27 +219,33 @@ lock_init (struct lock *lock)
 {
   ASSERT (lock != NULL);
 
-  list_init (&lock->donated_priority);
   lock->holder = NULL;
   sema_init (&lock->semaphore, 1);
 }
 
-struct donor
-donor_init (int priority)
-{
-  struct donor donor;
-
-  donor.priority = priority;
-  return donor;
+/**
+ * Determines whether one lock has a max_priority
+ * lower than another lock.
+ * @param a The first lock.
+ * @param b The second lock.
+ * @param aux (Unused).
+ * @return `true` iff lock `a` has lower max_priority than lock `b`
+ */
+static bool
+lock_lower_priority (
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+) {
+  int a_priority = list_entry(a, struct lock, elem)->max_priority;
+  int b_priority = list_entry(b, struct lock, elem)->max_priority;
+  return a_priority < b_priority;
 }
 
-void
-donate_priority_to_lock (struct donor *donor, struct lock *lock)
+static struct list *
+lock_donors (struct lock *lock)
 {
-  list_insert_ordered (&lock->donated_priority,
-                       &donor->elem,
-                       donor_lower_priority,
-                       NULL);
+  return &lock->semaphore.waiters;
 }
 
 /* Acquires LOCK, sleeping until it becomes available if
