@@ -153,11 +153,19 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) {
-    list_sort (&sema->waiters, thread_lower_priority, NULL);
-    thread_unblock (list_entry (list_pop_back (&sema->waiters),
-                                struct thread, elem));
+    struct thread *max_thread = list_pop_max_priority (&sema->waiters);
+    /* Check if this thread would be now acquiring a lock.
+       If so, revoke donation to the owner from this thread. */
+    struct lock *lock = max_thread->lock_to_wait;
+    if (lock != NULL)
+      {
+        lock_revoke_donation (lock, max_thread, MAX_DEPTH);
+        max_thread->lock_to_wait = NULL;
+      }
+    thread_unblock (max_thread);
   }
   sema->value++;
+  /* Yield the current thread to the CPU, so that priorities can be updated. */
   thread_yield();
   intr_set_level (old_level);
 }
@@ -329,6 +337,28 @@ lock_release (struct lock *lock)
 /* Update priority. */
 void
 thread_update_priority (struct thread *t)
+
+static void
+lock_add_donation (struct lock *lock, struct thread *donor, int max_depth)
+{
+  if (max_depth <= 0 || lock == NULL)
+    return;
+  /* Increase the maximum priority of the waiter list. */
+  if (lock->max_priority < donor->priority)
+    lock->max_priority = donor->priority;
+  ASSERT (lock->max_priority <= donor->priority);
+  /* Increase the priority of the lock's owner; if the owner is NULL, then this
+     means the lock was just now released by the current thread. */
+  struct thread *donee = lock->holder;
+  if (donee == NULL)
+    return;
+  /* Increase the donation on the donee's side by setting the new maximum
+     priority across all locks owned by the donee's thread. */
+  if (donee->priority < donor->priority)
+    donee->priority = donor->priority;
+  /* Recurse up the tree of locks to revoke the donation up to the depth. */
+  lock_add_donation (donee->lock_to_wait, donee, max_depth - 1);
+}
 {
   enum intr_level old_level = intr_disable ();
   int max_priority = t->original_priority;
