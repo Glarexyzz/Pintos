@@ -1,13 +1,10 @@
 #include "threads/thread.h"
 #include <debug.h>
 #include <stddef.h>
-#include <random.h>
 #include <stdio.h>
 #include <string.h>
 #include "devices/timer.h"
-#include "threads/flags.h"
 #include "threads/interrupt.h"
-#include "threads/intr-stubs.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -287,7 +284,6 @@ thread_tick (void)
       }
     }
   }
-
 
   /* Update statistics. */
   if (cur_thread_is_idle)
@@ -736,8 +732,6 @@ init_thread (struct thread *t, const char *name, int priority)
   ASSERT (t != NULL);
   ASSERT (PRI_MIN <= priority && priority <= PRI_MAX);
   ASSERT (name != NULL);
-
-
 
   memset (t, 0, sizeof *t);
   t->status = THREAD_BLOCKED;

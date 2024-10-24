@@ -128,6 +128,7 @@ sema_up (struct semaphore *sema)
   sema->value++;
   intr_set_level (old_level);
 
+  // yield the thread if we just woke up a higher-priority one
   if (
     will_unblock_thread &&
     thread_current()->priority < thread_to_wake->priority &&
