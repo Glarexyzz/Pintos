@@ -456,62 +456,6 @@ lock_held_by_current_thread (const struct lock *lock)
   return lock->holder == thread_current ();
 }
 
-/**
- * Determines whether one lock has a max_priority
- * lower than another lock.
- * @param a The first lock.
- * @param b The second lock.
- * @param aux (Unused).
- * @return `true` iff lock `a` has lower max_priority than lock `b`
- */
-bool
-lock_lower_donor_priority (
-    const struct list_elem *a,
-    const struct list_elem *b,
-    void *aux UNUSED){
-  struct list a_list = list_entry(a,struct lock,elem)->donated_priority;
-  int a_priority = list_entry(list_back(&a_list), struct donor, elem)->priority;
-  struct list b_list = list_entry(b,struct lock,elem)->donated_priority;
-  int b_priority = list_entry(list_back(&b_list), struct donor, elem)->priority;
-  return a_priority < b_priority;
-}
-
-/**
- * Determines whether one lock has a max_priority
- * lower than another lock.
- * @param a The first lock.
- * @param b The second lock.
- * @param aux (Unused).
- * @return `true` iff lock `a` has lower max_priority than lock `b`
- */
-bool
-lock_lower_priority (
-    const struct list_elem *a,
-    const struct list_elem *b,
-    void *aux UNUSED){
-  int a_priority = list_entry(a, struct lock, elem)->max_priority;
-  int b_priority = list_entry(b, struct lock, elem)->max_priority;
-  return a_priority < b_priority;
-}
-
-/**
- * Determines whether one donor has a priority
- * lower than another donor.
- * @param a The first donor.
- * @param b The second donor.
- * @param aux (Unused).
- * @return `true` iff donor `a` has lower priority than donor `b`
- */
-bool
-donor_lower_priority (
-    const struct list_elem *a,
-    const struct list_elem *b,
-    void *aux UNUSED){
-  int a_priority = list_entry(a,struct donor,elem)->priority;
-  int b_priority = list_entry(b,struct donor,elem)->priority;
-  return a_priority < b_priority;
-}
-
 /* One semaphore in a list. */
 struct semaphore_elem 
   {
