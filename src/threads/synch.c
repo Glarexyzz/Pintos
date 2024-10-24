@@ -397,6 +397,17 @@ lock_revoke_donation (struct lock *lock, struct thread *donor)
   lock_revoke_donation (donee->lock_to_wait, donee);
 }
 
+/**
+ * Adds donation from thread DONOR to the current thread, updating the
+ * maximum priority from donation in all lock owners it donates to.
+ * When this function is called, DONOR is about to be added in the list of
+ * waiters held by the LOCK.
+ * The top-level call has the lock about to block the current thread.
+ * Recursive calls will update the donation from any locks the donee is waiting
+ * for.
+ * @param lock the lock from which DONOR will be waiting.
+ * @param donor the thread that will be blocked by the LOCK's semaphore.
+ */
 static void
 lock_add_donation (struct lock *lock, struct thread *donor)
 {
