@@ -32,6 +32,17 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static void lock_add_donation (
+    struct lock *lock,
+    struct thread *donor,
+    int max_depth
+);
+static void lock_revoke_donation (
+    struct lock *lock,
+    struct thread *donor,
+    int max_depth
+);
+
 /**
  * Removes the (first) element with maximal priority in a list of threads.
  * This list needs not be sorted, and as such the operation takes O(n) time
