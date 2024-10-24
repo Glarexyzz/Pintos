@@ -32,6 +32,29 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+/**
+ * Removes the (first) element with maximal priority in a list of threads.
+ * This list needs not be sorted, and as such the operation takes O(n) time
+ * in the number of threads.
+ * Panics if the list is empty.
+ * @param thread_list the list to pop from
+ * @return the thread with the maximum priority.
+ */
+static struct thread *
+list_pop_max_priority (struct list *thread_list)
+{
+  ASSERT (!list_empty (thread_list));
+  struct list_elem *max_priority_elem;
+  max_priority_elem = list_max (
+    thread_list,
+    thread_lower_priority,
+    NULL
+  );
+  ASSERT (max_priority_elem != list_end (thread_list));
+  list_remove (max_priority_elem);
+  return list_entry (max_priority_elem, struct thread, elem);
+}
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
