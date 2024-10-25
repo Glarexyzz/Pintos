@@ -439,24 +439,6 @@ lock_add_donation (struct lock *lock, struct thread *donor)
   lock_add_donation (donee->lock_to_wait, donee);
 }
 
-void thread_update_priority
-(int priority)
-{
-  enum intr_level old_level = intr_disable ();
-  struct thread *current_thread = thread_current ();
-  int prev_priority = current_thread->priority;
-  struct lock *lock_to_wait = current_thread->lock_to_wait;
-  /* Update any existing lock's donation values. */
-  current_thread->priority = priority;
-  if (prev_priority < priority) {
-    lock_add_donation (lock_to_wait, current_thread);
-  }
-  else if (prev_priority > priority) {
-    lock_revoke_donation (lock_to_wait, current_thread);
-  }
-  intr_set_level (old_level);
-}
-
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
    a lock would be racy.) */
