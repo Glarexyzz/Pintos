@@ -356,8 +356,12 @@ thread_update_lower_donation (struct thread *donee)
     /* Reset the thread's priority to this maximum,
        if it is greater than the default. */
     donee->priority = donee->original_priority;
-    if (maximum_priority > donee->priority)
+    if (maximum_priority > donee->priority) {
       donee->priority = maximum_priority;
+    }
+    if (donee->status == THREAD_READY) {
+      ready_list_reinsert(donee);
+    }
   } else {
     /* There are no locks, so set the thread's priority to the default. */
     donee->priority = donee->original_priority;
@@ -424,8 +428,12 @@ lock_add_donation (struct lock *lock, struct thread *donor)
     return;
   /* Increase the donation on the donee's side by setting the new maximum
      priority across all locks owned by the donee's thread. */
-  if (donee->priority < donor->priority)
+  if (donee->priority < donor->priority) {
     donee->priority = donor->priority;
+    if (donee->status == THREAD_READY) {
+      ready_list_reinsert(donee);
+    }
+  }
   /* Recurse up the tree of locks to add their donation upwards. */
   lock_add_donation (donee->lock_to_wait, donee);
 }
