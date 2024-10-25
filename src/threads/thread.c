@@ -598,40 +598,44 @@ thread_set_priority (int new_priority)
 {
   enum intr_level old_level = intr_disable ();
 
+  struct thread *current_thread = thread_current ();
+  current_thread->priority = new_priority;
+
   if (thread_mlfqs) {
-    thread_current ()->priority = new_priority;
     if (
       old_level == INTR_ON &&
-        new_priority < mlfq_highest_ready_priority()
-      ) {
+      new_priority < mlfq_highest_ready_priority()
+    ) {
       thread_yield();
     }
 
-  } else {
-    struct thread *current_thread = thread_current ();
-    current_thread->original_priority = new_priority;
-    current_thread->priority = new_priority;
+    intr_set_level (old_level);
+    return;
+  }
 
-    /* If donee's priority being modified during donation,
-       it will only influence the original priority */
-    if (!list_empty (&current_thread->locks_acquired)) {
-      int highest_priority = list_entry(
-        list_max(
-          &current_thread->locks_acquired,
-          &lock_lower_priority,
-          NULL
-        ),
+  current_thread->original_priority = new_priority;
+
+  /* If donee's priority being modified during donation,
+     it will only influence the original priority */
+  if (!list_empty (&current_thread->locks_acquired)) {
+    int highest_priority = list_entry(
+      list_max(
+        &current_thread->locks_acquired,
+        &lock_lower_priority,
+        NULL
+      ),
       struct lock,
       elem
-      )->max_priority;
-      if (highest_priority > new_priority) {
-        current_thread->priority = highest_priority;
-      }
+    )->max_priority;
+    if (highest_priority > new_priority) {
+      current_thread->priority = highest_priority;
     }
-    thread_yield ();
   }
 
   intr_set_level (old_level);
+
+  if (old_level == INTR_OFF)
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
