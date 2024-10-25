@@ -184,6 +184,7 @@ sema_up (struct semaphore *sema)
 
   // yield the thread if we just woke up a higher-priority one
   if (
+    thread_mlfqs &&
     will_unblock_thread &&
     thread_current()->priority < thread_to_wake->priority &&
     old_level == INTR_ON
