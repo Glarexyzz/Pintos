@@ -599,18 +599,6 @@ thread_set_priority (int new_priority)
   struct thread *current_thread = thread_current ();
   current_thread->priority = new_priority;
 
-  if (thread_mlfqs) {
-    if (
-      old_level == INTR_ON &&
-      new_priority < mlfq_highest_ready_priority()
-    ) {
-      thread_yield();
-    }
-
-    intr_set_level (old_level);
-    return;
-  }
-
   current_thread->original_priority = new_priority;
 
   /* If donee's priority being modified during donation,
