@@ -96,11 +96,13 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       list_push_back (&sema->waiters, &thread_current ()->elem);
-      /* Check if this thread would be waiting for a lock.
+      if (!thread_mlfqs) {
+        /* Check if this thread would be waiting for a lock.
          If so, handle donation to the owner. */
-      struct lock *lock = thread_current ()->lock_to_wait;
-      if (lock != NULL)
-        lock_add_donation (lock, thread_current ());
+        struct lock *lock = thread_current ()->lock_to_wait;
+        if (lock != NULL)
+          lock_add_donation (lock, thread_current ());
+      }
       thread_block ();
     }
   sema->value--;
@@ -144,23 +146,50 @@ sema_up (struct semaphore *sema)
 
   ASSERT (sema != NULL);
 
+  struct thread *thread_to_wake;
+  bool will_unblock_thread = !list_empty(&sema->waiters);
+
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) {
+  if (thread_mlfqs) {
+    if (will_unblock_thread)
+    {
+      thread_to_wake = list_entry(
+        list_pop_front (&sema->waiters),
+        struct thread,
+        elem
+      );
+      thread_unblock(thread_to_wake);
+    }
+  } else if (will_unblock_thread) {
     struct thread *max_thread = list_pop_max_priority (&sema->waiters);
     /* Check if this thread would be now acquiring a lock.
        If so, revoke donation to the owner from this thread. */
     struct lock *lock = max_thread->lock_to_wait;
     if (lock != NULL)
-      {
-        lock_revoke_donation (lock, max_thread);
-        max_thread->lock_to_wait = NULL;
-      }
+    {
+      lock_revoke_donation (lock, max_thread);
+      max_thread->lock_to_wait = NULL;
+    }
     thread_unblock (max_thread);
   }
+
   sema->value++;
+
+  // TODO: combine these yields
   /* Yield the current thread to the CPU, so that priorities can be updated. */
-  thread_yield();
+  if (!thread_mlfqs)
+    thread_yield();
+
   intr_set_level (old_level);
+
+  // yield the thread if we just woke up a higher-priority one
+  if (
+    will_unblock_thread &&
+    thread_current()->priority < thread_to_wake->priority &&
+    old_level == INTR_ON
+  ) {
+    thread_yield();
+  }
 }
 
 static void sema_test_helper (void *sema_);
@@ -263,32 +292,39 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-  enum intr_level old_level;
+  // TODO: optimise
+  if (thread_mlfqs) {
+    sema_down (&lock->semaphore);
+    lock->holder = thread_current ();
 
-  /* If a thread tries to acquire a lock that already
-     has an owner, this thread will then be blocked. */
-  struct thread *current_thread;
+  } else {
+    enum intr_level old_level;
 
-  /* Set the current thread's lock that it is waiting for early, so that
-     priority donation can be performed immediately when the semaphore is
-     downed. */
-  current_thread = thread_current ();
-  current_thread->lock_to_wait = lock;
+    /* If a thread tries to acquire a lock that already
+       has an owner, this thread will then be blocked. */
+    struct thread *current_thread;
 
-  sema_down (&lock->semaphore);
-  ASSERT (lock->semaphore.value == 0);
+    /* Set the current thread's lock that it is waiting for early, so that
+       priority donation can be performed immediately when the semaphore is
+       downed. */
+    current_thread = thread_current ();
+    current_thread->lock_to_wait = lock;
 
-  old_level = intr_disable ();
-  /* At this stage, the current thread has not been blocked, so it will become
-     the owner of the lock. */
-  lock->holder = current_thread;
-  current_thread->lock_to_wait = NULL;
-  /* Since there are initially no threads waiting for the lock, no donation
-     occurs. */
-  lock_update_lower_max_priority(lock);
-  list_push_back (&current_thread->locks_acquired, &lock->elem);
+    sema_down (&lock->semaphore);
+    ASSERT (lock->semaphore.value == 0);
 
-  intr_set_level (old_level);
+    old_level = intr_disable ();
+    /* At this stage, the current thread has not been blocked, so it will become
+       the owner of the lock. */
+    lock->holder = current_thread;
+    current_thread->lock_to_wait = NULL;
+    /* Since there are initially no threads waiting for the lock, no donation
+       occurs. */
+    lock_update_lower_max_priority(lock);
+    list_push_back (&current_thread->locks_acquired, &lock->elem);
+
+    intr_set_level (old_level);
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -322,7 +358,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  list_remove (&lock->elem);
+  if (!thread_mlfqs)
+    list_remove (&lock->elem);
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
@@ -458,7 +495,7 @@ struct semaphore_elem
   };
 
 /**
- * Determines whether one semaphore has a thread that has 
+ * Determines whether one semaphore has a thread that has
  * lower priority than another semaphore's thread.
  * @param a The first semaphore.
  * @param b The second semaphore.
@@ -543,7 +580,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
+  if (!list_empty (&cond->waiters))
   {
     list_sort (&cond->waiters, sema_lower_priority, NULL);
     sema_up (&list_entry (list_pop_back (&cond->waiters),
