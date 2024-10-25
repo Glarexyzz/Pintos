@@ -70,11 +70,6 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-bool thread_lower_priority(
-  const struct list_elem *a,
-  const struct list_elem *b,
-  void *aux UNUSED
-);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
