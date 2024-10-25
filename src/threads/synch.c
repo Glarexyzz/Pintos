@@ -232,7 +232,7 @@ lock_init (struct lock *lock)
  * @param aux (Unused).
  * @return `true` iff lock `a` has lower max_priority than lock `b`
  */
-static bool
+bool
 lock_lower_priority (
   const struct list_elem *a,
   const struct list_elem *b,
