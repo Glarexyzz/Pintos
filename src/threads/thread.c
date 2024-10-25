@@ -259,7 +259,7 @@ bool thread_lower_priority(
 ) {
   uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
   uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
-  return a_priority < b_priority;
+  return a_priority <= b_priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
