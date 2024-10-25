@@ -632,7 +632,7 @@ thread_set_priority (int new_priority)
 
   intr_set_level (old_level);
 
-  if (old_level == INTR_OFF)
+  if (old_level == INTR_ON)
     thread_yield ();
 }
 
