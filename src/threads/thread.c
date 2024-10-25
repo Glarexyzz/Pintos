@@ -80,12 +80,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static bool thread_lower_priority(
-  const struct list_elem *a,
-  const struct list_elem *b,
-  void *aux UNUSED
-);
-static int ready_thread_highest_priority(void);
+static int mlfq_highest_ready_priority(void);
 static void ready_list_insert(struct thread *t);
 static void push_to_update_pri_list(struct thread *t);
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
@@ -215,13 +210,11 @@ static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
 
   // move the thread to the correct queue if its priority changes
   if (t->status == THREAD_READY && priority != t->priority) {
-    list_remove(&t->elem);
     t->priority = priority;
 
     enum intr_level old_level = intr_disable();
-    list_push_front(&queues[priority - PRI_MIN], &t->elem);
+    ready_list_reinsert(t);
     intr_set_level(old_level);
-
   } else {
     t->priority = priority;
   }
@@ -279,7 +272,7 @@ thread_tick (void)
         cur_elem = next_elem;
       }
 
-      if (t->priority < ready_thread_highest_priority()) {
+      if (t->priority < mlfq_highest_ready_priority()) {
         intr_yield_on_return();
       }
     }
@@ -394,47 +387,33 @@ thread_block (void)
  * @param a The first thread.
  * @param b The second thread.
  * @param aux (Unused).
- * @return `true` iff thread `a` has lower priority than thread `b`
+ * @return `true` iff thread `a` has lower or equal priority than thread `b`
+ * @remark the reason for using lower or equal to instead of just lower is to
+ * prevent a recently inserted thread from passing another thread of equal
+ * priority when inserted into a list.
  */
-static bool thread_lower_priority(
+bool thread_lower_priority(
     const struct list_elem *a,
     const struct list_elem *b,
     void *aux UNUSED
 ) {
   uint64_t a_priority = list_entry(a, struct thread, elem)->priority;
   uint64_t b_priority = list_entry(b, struct thread, elem)->priority;
-  return a_priority < b_priority;
+  return a_priority <= b_priority;
 }
 
 /**
- * @return The highest priority of all ready threads, or PRI_MIN - 1 if no
- * threads are ready.
+ * Removes a thread from the ready_list and reinserts it.
+ * @param t
+ * @pre Interrupts are disabled.
+ * @pre t->status is THREAD_READY.
  */
-static int ready_thread_highest_priority() {
-  int highest_priority = PRI_MIN - 1;
+void ready_list_reinsert(struct thread *t) {
+  ASSERT (intr_get_level () == INTR_OFF);
+  ASSERT (t->status == THREAD_READY);
 
-  enum intr_level old_level = intr_disable();
-
-  if (thread_mlfqs) {
-    // Take highest priority non-empty queue
-    for (int i = NUM_QUEUES - 1; i >= 0; i--) {
-      if (!list_empty(&queues[i])) {
-        highest_priority = i;
-        break;
-      }
-    }
-  } else if (!list_empty(&ready_list)) {
-    // ready_list is sorted, so we take the back
-    highest_priority = list_entry(
-      list_back(&ready_list),
-      struct thread,
-      elem
-    )->priority;
-  }
-
-  intr_set_level(old_level);
-
-  return highest_priority;
+  list_remove(&t->elem);
+  ready_list_insert(t);
 }
 
 /**
@@ -452,6 +431,31 @@ static void ready_list_insert(struct thread *t) {
   } else {
     list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
   }
+}
+
+/**
+ * @return The highest priority of all ready threads, or PRI_MIN - 1 if no
+ * threads are ready.
+ * @pre thread_mlfqs is true
+ */
+static int mlfq_highest_ready_priority() {
+  ASSERT(thread_mlfqs);
+  
+  int highest_priority = PRI_MIN - 1;
+
+  enum intr_level old_level = intr_disable();
+  
+  // Take highest priority non-empty queue
+  for (int i = NUM_QUEUES - 1; i >= 0; i--) {
+    if (!list_empty(&queues[i])) {
+      highest_priority = i + PRI_MIN;
+      break;
+    }
+  }
+
+  intr_set_level(old_level);
+
+  return highest_priority;
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -590,18 +594,35 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  ASSERT (!thread_mlfqs);
+  enum intr_level old_level = intr_disable ();
 
-  enum intr_level old_level = intr_disable();
+  struct thread *current_thread = thread_current ();
+  current_thread->priority = new_priority;
 
-  if (
-    old_level == INTR_ON &&
-    new_priority < ready_thread_highest_priority()
-  ) {
-    thread_yield();
+  current_thread->original_priority = new_priority;
+
+  /* If donee's priority being modified during donation,
+     it will only influence the original priority */
+  if (!list_empty (&current_thread->locks_acquired)) {
+    int highest_priority = list_entry(
+      list_max(
+        &current_thread->locks_acquired,
+        &lock_lower_priority,
+        NULL
+      ),
+      struct lock,
+      elem
+    )->max_priority;
+    if (highest_priority > new_priority) {
+      current_thread->priority = highest_priority;
+    }
   }
 
-  intr_set_level(old_level);
+  intr_set_level (old_level);
+
+  if (old_level == INTR_ON)
+    thread_yield ();
 }
 
 /* Returns the current thread's priority. */
@@ -621,7 +642,7 @@ thread_set_nice (int nice)
 
   if (
     intr_get_level() == INTR_ON &&
-    thread_current()->priority < ready_thread_highest_priority()
+    thread_current()->priority < mlfq_highest_ready_priority()
   ) {
     thread_yield();
   }
@@ -754,8 +775,12 @@ init_thread (struct thread *t, const char *name, int priority)
 
     // Initialise priority
     mlfqs_update_priority(t, NULL);
+
   } else {
     t->priority = priority;
+    t->original_priority = priority;
+    list_init (&t->locks_acquired);
+    t->lock_to_wait = NULL;
   }
 
   t->magic = THREAD_MAGIC;
