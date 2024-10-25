@@ -285,7 +285,7 @@ lock_acquire (struct lock *lock)
   current_thread->lock_to_wait = NULL;
   /* Since there are initially no threads waiting for the lock, no donation
      occurs. */
-  lock->max_priority = PRI_MIN;
+  lock_update_lower_max_priority(lock);
   list_push_back (&current_thread->locks_acquired, &lock->elem);
 
   intr_set_level (old_level);
