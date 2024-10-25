@@ -210,13 +210,11 @@ static void mlfqs_update_priority(struct thread *t, void *aux UNUSED) {
 
   // move the thread to the correct queue if its priority changes
   if (t->status == THREAD_READY && priority != t->priority) {
-    list_remove(&t->elem);
     t->priority = priority;
 
     enum intr_level old_level = intr_disable();
-    list_push_front(&queues[priority - PRI_MIN], &t->elem);
+    ready_list_reinsert(t);
     intr_set_level(old_level);
-
   } else {
     t->priority = priority;
   }
