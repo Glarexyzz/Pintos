@@ -265,6 +265,32 @@ bool thread_lower_priority(
   return a_priority <= b_priority;
 }
 
+/**
+ * Inserts a thread into the ready_list while maintaining priority order.
+ * @param t The thread to be inserted.
+ * @pre Interrupts are disabled.
+ */
+static void ready_list_insert(struct thread *t) {
+  ASSERT (intr_get_level () == INTR_OFF);
+
+  list_insert_ordered(&ready_list, &t->elem, &thread_lower_priority, NULL);
+}
+
+/**
+ * Removes a thread from the ready_list and reinserts it.
+ * @param t
+ * @pre Interrupts are disabled.
+ * @pre t->status is THREAD_READY.
+ */
+void ready_list_reinsert(struct thread *t) {
+  ASSERT (intr_get_level () == INTR_OFF);
+  ASSERT (t->status == THREAD_READY);
+
+  list_remove(&t->elem);
+  ready_list_insert(t);
+}
+
+
 /* Transitions a blocked thread T to the ready-to-run state.
    This is an error if T is not blocked.  (Use thread_yield() to
    make the running thread ready.)

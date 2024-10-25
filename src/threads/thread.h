@@ -142,6 +142,7 @@ bool thread_lower_priority(
     const struct list_elem *,
     void *
 );
+void ready_list_reinsert(struct thread *t);
 
 int thread_get_nice (void);
 void thread_set_nice (int);
