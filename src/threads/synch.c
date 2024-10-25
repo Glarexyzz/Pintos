@@ -37,24 +37,21 @@ static void lock_revoke_donation (struct lock *lock, struct thread *donor);
 static void lock_update_lower_max_priority (struct lock *lock);
 
 /**
- * Removes the (first) element with maximal priority in a list of threads.
- * This list needs not be sorted, and as such the operation takes O(n) time
- * in the number of threads.
+ * Removes an element from a list of waiting threads.
  * Panics if the list is empty.
  * @param thread_list the list to pop from
  * @return the thread with the maximum priority.
+ * @remark In the priority scheduler, this list need not be sorted, and as such
+ * the operation takes O(n) time in the number of threads. In the MLFQ
+ * scheduler, the first element in the list is removed, which takes O(1) time.
  */
 static struct thread *
-list_pop_max_priority (struct list *thread_list)
+waiter_list_pop (struct list *thread_list)
 {
   ASSERT (!list_empty (thread_list));
   struct list_elem *max_priority_elem;
-  max_priority_elem = list_max (
-    thread_list,
-    thread_lower_priority,
-    NULL
-  );
-  ASSERT (max_priority_elem != list_end (thread_list));
+  max_priority_elem = thread_mlfqs ? list_front (thread_list)
+    : list_max (thread_list, thread_lower_priority, NULL);
   list_remove (max_priority_elem);
   return list_entry (max_priority_elem, struct thread, elem);
 }
@@ -150,44 +147,37 @@ sema_up (struct semaphore *sema)
   bool will_unblock_thread = !list_empty(&sema->waiters);
 
   old_level = intr_disable ();
-  if (thread_mlfqs) {
-    if (will_unblock_thread)
-    {
-      thread_to_wake = list_entry(
-        list_pop_front (&sema->waiters),
-        struct thread,
-        elem
-      );
-      thread_unblock(thread_to_wake);
+  if (will_unblock_thread) {
+    thread_to_wake = waiter_list_pop (&sema->waiters);
+
+    if (!thread_mlfqs) {
+      /* Check if this thread would be now acquiring a lock.
+         If so, revoke donation to the owner from this thread. */
+      struct lock *lock = thread_to_wake->lock_to_wait;
+      if (lock != NULL) {
+        lock_revoke_donation (lock, thread_to_wake);
+        thread_to_wake->lock_to_wait = NULL;
+      }
     }
-  } else if (will_unblock_thread) {
-    struct thread *max_thread = list_pop_max_priority (&sema->waiters);
-    /* Check if this thread would be now acquiring a lock.
-       If so, revoke donation to the owner from this thread. */
-    struct lock *lock = max_thread->lock_to_wait;
-    if (lock != NULL)
-    {
-      lock_revoke_donation (lock, max_thread);
-      max_thread->lock_to_wait = NULL;
-    }
-    thread_unblock (max_thread);
+
+    thread_unblock (thread_to_wake);
   }
 
   sema->value++;
 
-  // TODO: combine these yields
-  /* Yield the current thread to the CPU, so that priorities can be updated. */
-  if (!thread_mlfqs)
-    thread_yield();
-
   intr_set_level (old_level);
 
-  // yield the thread if we just woke up a higher-priority one
+  if (old_level == INTR_OFF) return;
+
+  /* When priority scheduling, yield the current thread to the CPU, so that
+     priorities can be updated. Otherwise, in the MFLQ scheduler, yield only
+     if we just woke up a higher-priority thread. */
   if (
-    thread_mlfqs &&
-    will_unblock_thread &&
-    thread_current()->priority < thread_to_wake->priority &&
-    old_level == INTR_ON
+    !thread_mlfqs ||
+    (
+      will_unblock_thread &&
+      thread_current()->priority < thread_to_wake->priority
+    )
   ) {
     thread_yield();
   }
