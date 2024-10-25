@@ -250,7 +250,10 @@ thread_block (void)
  * @param a The first thread.
  * @param b The second thread.
  * @param aux (Unused).
- * @return `true` iff thread `a` has lower priority than thread `b`
+ * @return `true` iff thread `a` has lower or equal priority than thread `b`
+ * @remark the reason for using lower or equal to instead of just lower is to
+ * prevent a recently inserted thread from passing another thread of equal
+ * priority when inserted into a list.
  */
 bool thread_lower_priority(
     const struct list_elem *a,
