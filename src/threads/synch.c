@@ -34,6 +34,7 @@
 
 static void lock_add_donation (struct lock *lock, struct thread *donor);
 static void lock_revoke_donation (struct lock *lock, struct thread *donor);
+static void lock_update_lower_max_priority (struct lock *lock);
 
 /**
  * Removes the (first) element with maximal priority in a list of threads.
