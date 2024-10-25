@@ -308,10 +308,12 @@ lock_acquire (struct lock *lock)
   ASSERT (lock->semaphore.value == 0);
 
   old_level = intr_disable ();
+
   /* At this stage, the current thread has not been blocked, so it will become
      the owner of the lock. */
   lock->holder = current_thread;
   current_thread->lock_to_wait = NULL;
+
   /* Since there are initially no threads waiting for the lock, no donation
      occurs. */
   lock_update_lower_max_priority(lock);
@@ -374,25 +376,30 @@ static void
 thread_update_lower_donation (struct thread *donee)
 {
   if (!list_empty (&donee->locks_acquired)) {
+
     struct list_elem *maximal_lock_elem = list_max (
       &donee->locks_acquired,
       lock_lower_priority,
       NULL
     );
+
     int maximum_priority = list_entry (
       maximal_lock_elem,
       struct lock,
       elem
     )->max_priority;
+
     /* Reset the thread's priority to this maximum,
        if it is greater than the default. */
     donee->priority = donee->original_priority;
     if (maximum_priority > donee->priority) {
       donee->priority = maximum_priority;
     }
+
     if (donee->status == THREAD_READY) {
       ready_list_reinsert(donee);
     }
+
   } else {
     /* There are no locks, so set the thread's priority to the default. */
     donee->priority = donee->original_priority;
@@ -417,17 +424,22 @@ lock_revoke_donation (struct lock *lock, struct thread *donor)
 {
   if (lock == NULL)
     return;
+
   /* Update the maximum priority of the waiter list. */
   lock_update_lower_max_priority (lock);
+
   ASSERT (lock->max_priority <= donor->priority);
+
   /* Update the priority of the lock's owner; if the owner is NULL, then this
      means the lock was just now released by the current thread. */
   struct thread *donee = lock->holder;
   if (donee == NULL)
     donee = thread_current();
+
   /* Revoke the donation on the donee's side by finding the new maximum
      priority across all locks owned by the donee's thread. */
   thread_update_lower_donation (donee);
+
   /* Recurse up the tree of locks to revoke their donation upwards. */
   lock_revoke_donation (donee->lock_to_wait, donee);
 }
@@ -448,15 +460,19 @@ lock_add_donation (struct lock *lock, struct thread *donor)
 {
   if (lock == NULL)
     return;
+
   /* Increase the maximum priority of the waiter list. */
   if (lock->max_priority < donor->priority)
     lock->max_priority = donor->priority;
+
   ASSERT (lock->max_priority <= donor->priority);
+
   /* Increase the priority of the lock's owner; if the owner is NULL, then this
      means the lock was just now released by the current thread. */
   struct thread *donee = lock->holder;
   if (donee == NULL)
     return;
+
   /* Increase the donation on the donee's side by setting the new maximum
      priority across all locks owned by the donee's thread. */
   if (donee->priority < donor->priority) {
@@ -465,6 +481,7 @@ lock_add_donation (struct lock *lock, struct thread *donor)
       ready_list_reinsert(donee);
     }
   }
+
   /* Recurse up the tree of locks to add their donation upwards. */
   lock_add_donation (donee->lock_to_wait, donee);
 }
