@@ -80,7 +80,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
-static int ready_thread_highest_priority(void);
+static int mlfq_highest_ready_priority(void);
 static void ready_list_insert(struct thread *t);
 static void push_to_update_pri_list(struct thread *t);
 static void update_recent_cpu(struct thread *t, void *aux UNUSED);
@@ -274,7 +274,7 @@ thread_tick (void)
         cur_elem = next_elem;
       }
 
-      if (t->priority < ready_thread_highest_priority()) {
+      if (t->priority < mlfq_highest_ready_priority()) {
         intr_yield_on_return();
       }
     }
@@ -438,27 +438,21 @@ static void ready_list_insert(struct thread *t) {
 /**
  * @return The highest priority of all ready threads, or PRI_MIN - 1 if no
  * threads are ready.
+ * @pre thread_mlfqs is true
  */
-static int ready_thread_highest_priority() {
+static int mlfq_highest_ready_priority() {
+  ASSERT(thread_mlfqs);
+  
   int highest_priority = PRI_MIN - 1;
 
   enum intr_level old_level = intr_disable();
-
-  if (thread_mlfqs) {
-    // Take highest priority non-empty queue
-    for (int i = NUM_QUEUES - 1; i >= 0; i--) {
-      if (!list_empty(&queues[i])) {
-        highest_priority = i;
-        break;
-      }
+  
+  // Take highest priority non-empty queue
+  for (int i = NUM_QUEUES - 1; i >= 0; i--) {
+    if (!list_empty(&queues[i])) {
+      highest_priority = i + PRI_MIN;
+      break;
     }
-  } else if (!list_empty(&ready_list)) {
-    // ready_list is sorted, so we take the back
-    highest_priority = list_entry(
-      list_back(&ready_list),
-      struct thread,
-      elem
-    )->priority;
   }
 
   intr_set_level(old_level);
@@ -608,7 +602,7 @@ thread_set_priority (int new_priority)
     thread_current ()->priority = new_priority;
     if (
       old_level == INTR_ON &&
-        new_priority < ready_thread_highest_priority()
+        new_priority < mlfq_highest_ready_priority()
       ) {
       thread_yield();
     }
@@ -657,7 +651,7 @@ thread_set_nice (int nice)
 
   if (
     intr_get_level() == INTR_ON &&
-    thread_current()->priority < ready_thread_highest_priority()
+    thread_current()->priority < mlfq_highest_ready_priority()
   ) {
     thread_yield();
   }
