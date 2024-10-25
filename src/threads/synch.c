@@ -283,39 +283,41 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-  // TODO: optimise
+
   if (thread_mlfqs) {
+    // No priority donation handling for MLFQS
     sema_down (&lock->semaphore);
     lock->holder = thread_current ();
-
-  } else {
-    enum intr_level old_level;
-
-    /* If a thread tries to acquire a lock that already
-       has an owner, this thread will then be blocked. */
-    struct thread *current_thread;
-
-    /* Set the current thread's lock that it is waiting for early, so that
-       priority donation can be performed immediately when the semaphore is
-       downed. */
-    current_thread = thread_current ();
-    current_thread->lock_to_wait = lock;
-
-    sema_down (&lock->semaphore);
-    ASSERT (lock->semaphore.value == 0);
-
-    old_level = intr_disable ();
-    /* At this stage, the current thread has not been blocked, so it will become
-       the owner of the lock. */
-    lock->holder = current_thread;
-    current_thread->lock_to_wait = NULL;
-    /* Since there are initially no threads waiting for the lock, no donation
-       occurs. */
-    lock_update_lower_max_priority(lock);
-    list_push_back (&current_thread->locks_acquired, &lock->elem);
-
-    intr_set_level (old_level);
+    return;
   }
+
+  // Priority donation
+  enum intr_level old_level;
+
+  /* If a thread tries to acquire a lock that already
+     has an owner, this thread will then be blocked. */
+  struct thread *current_thread;
+
+  /* Set the current thread's lock that it is waiting for early, so that
+     priority donation can be performed immediately when the semaphore is
+     downed. */
+  current_thread = thread_current ();
+  current_thread->lock_to_wait = lock;
+
+  sema_down (&lock->semaphore);
+  ASSERT (lock->semaphore.value == 0);
+
+  old_level = intr_disable ();
+  /* At this stage, the current thread has not been blocked, so it will become
+     the owner of the lock. */
+  lock->holder = current_thread;
+  current_thread->lock_to_wait = NULL;
+  /* Since there are initially no threads waiting for the lock, no donation
+     occurs. */
+  lock_update_lower_max_priority(lock);
+  list_push_back (&current_thread->locks_acquired, &lock->elem);
+
+  intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
