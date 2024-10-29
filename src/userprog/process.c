@@ -54,6 +54,14 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  // TODO: Pass all arguments, not just filename.
+  for (int i = 0; file_name[i] != '\0'; i++) {
+    if (file_name[i] == ' ') {
+      file_name[i] = '\0';
+      break;
+    }
+  }
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
