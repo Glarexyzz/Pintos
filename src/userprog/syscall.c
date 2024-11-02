@@ -6,7 +6,8 @@
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
 
-/** Get the argument of type `type` and index `arg_no` from an `intr_frame`
+/**
+ * Get the argument of type `type` and index `arg_no` from an `intr_frame`
  * @param type The type of the argument
  * @param arg_no The 1-indexed index of the argument
  * @pre The `intr_frame` is called `f` and is in scope
