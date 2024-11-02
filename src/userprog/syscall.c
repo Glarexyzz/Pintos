@@ -3,6 +3,23 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+/// The maximum number of bytes to write to the console at a time
+#define MAX_WRITE_SIZE 300
+
+/** Get the argument of type `type` and index `arg_no` from an `intr_frame`
+ * @param type The type of the argument
+ * @param arg_no The 1-indexed index of the argument
+ * @pre The `intr_frame` is called `f` and is in scope
+ * @example \code
+ * void example(struct intr_frame *f) {
+ *   // example(int x, char y)
+ *   int x = ARG(int, 1);
+ *   char y = ARG(int, 2);
+ * }
+ * \endcode
+ */
+#define ARG(type, arg_no) (*((type *) (((uint32_t *) f->esp)+(arg_no))))
+
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
@@ -48,8 +65,32 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
  * Handles write system calls.
  * @param f The interrupt stack frame
  */
-static void write(struct intr_frame *f UNUSED) {
-  printf("Write called.\n");
+static void write(struct intr_frame *f) {
+  // write(int fd, const void *buffer, unsigned size)
+  int fd = ARG(int, 1);
+  const void *buffer = ARG(const void *, 2);
+  unsigned size = ARG(unsigned, 3);
+
+  if (fd == 1) {
+    // Console write
+
+    unsigned bytes_written;
+
+    // Keep writing MAX_WRITE_SIZE bytes as long as it's less than size
+    for (
+      bytes_written = 0;
+      bytes_written + MAX_WRITE_SIZE < size;
+      bytes_written += MAX_WRITE_SIZE
+    ) {
+      putbuf(buffer + bytes_written, MAX_WRITE_SIZE);
+    }
+
+    // Write the remaining bytes
+    putbuf(buffer + bytes_written, size - bytes_written);
+
+    // Assume all bytes have been written
+    f->eax = size;
+  }
 }
 
 /**
