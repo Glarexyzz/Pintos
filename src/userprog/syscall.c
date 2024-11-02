@@ -1,4 +1,5 @@
 #include "userprog/syscall.h"
+#include "userprog/process.h"
 #include <stdio.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -70,7 +71,9 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
-  printf("Process exited with status %d\n", status);
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+  // Free the process's resources.
+  process_exit();
   thread_exit();
 }
 
