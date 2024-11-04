@@ -1,8 +1,10 @@
 #include "userprog/syscall.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include <stdio.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
@@ -25,6 +27,7 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
+static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void exit_process(int status) NO_RETURN;
 static void syscall_handler (struct intr_frame *);
 
@@ -66,6 +69,32 @@ static void exit_process(int status) {
   // Free the process's resources.
   process_exit();
   thread_exit();
+}
+
+/**
+ * Get the kernel virtual address of a virtual user address from the page
+ * directory provided.
+ * @param pd The page directory from which to read.
+ * @param uaddr The user address.
+ * @return The physical address.
+ * @remark For safety, do not perform pointer arithmetic on the returned pointer
+ * from this function.
+ * @remark If an invalid user address is passed, the process will be
+ */
+static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
+  if (!is_user_vaddr(uaddr)) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  const void *paddr = pagedir_get_page(pd, uaddr);
+
+  if (paddr == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  return paddr;
 }
 
 /**
