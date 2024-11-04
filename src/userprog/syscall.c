@@ -25,6 +25,7 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
+static void exit_process(int status) NO_RETURN;
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
@@ -57,6 +58,17 @@ syscall_init (void)
 }
 
 /**
+ * Exits a user program with the provided status code.
+ * @param status The exit status code.
+ */
+static void exit_process(int status) {
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+  // Free the process's resources.
+  process_exit();
+  thread_exit();
+}
+
+/**
  * Placeholder for unimplemented system calls.
  * @param f The interrupt stack frame
  */
@@ -71,10 +83,7 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-  // Free the process's resources.
-  process_exit();
-  thread_exit();
+  exit_process(status);
 }
 
 /**
