@@ -70,7 +70,77 @@ syscall_init (void)
  * @param status The exit status code.
  */
 static void exit_process(int status) {
+
+  /*
+   * When a user process is exited, the user_processes hashmap must be updated.
+   * We must:
+   * - Update the exit status of the process, and up its semaphore
+   * - Delete all the process's child processes from the user_processes hashmap,
+   *   since no processes can wait for them anymore
+   */
+
+  struct thread *cur_thread = thread_current();
+
+  // Setup to find the current process in the user_processes hashmap
+  struct process_status process_to_find;
+  process_to_find.tid = cur_thread->tid;
+
+  lock_acquire(&user_processes_lock);
+
+  // Check if this process has an entry in the user_processes hashmap
+  struct hash_elem *process_found_elem = hash_find(
+    &user_processes,
+    &process_to_find.elem
+  );
+
+  // If the process does have an entry
+  if (process_found_elem != NULL) {
+    // Get the process's entry
+    struct process_status *process_found = hash_entry(
+      process_found_elem,
+      struct process_status,
+      elem
+    );
+
+    // Update the entry's exit status and up its semaphore to unblock its waiter
+    process_found->status = status;
+    sema_up(&process_found->sema);
+  }
+
+  lock_release(&user_processes_lock);
+
+  // Delete all this process's children from the hashmap
+  struct list_elem *curr_child = list_begin(&cur_thread->child_tids);
+
+  // Loop through all the process's children
+  while (curr_child != list_end(&cur_thread->child_tids)) {
+
+    // Get the process_tid struct of the child
+    struct process_tid *curr_child_process_tid = list_entry(
+      curr_child,
+      struct process_tid,
+      elem
+    );
+
+    // Setup to find the child process in the user_processes hashmap
+    struct process_status child_to_find;
+    child_to_find.tid = curr_child_process_tid->tid;
+
+    // Remove the child from the current process's list, and free its struct
+    struct list_elem *prev_child = curr_child;
+    curr_child = list_next(prev_child);
+    list_remove(prev_child);
+    free(curr_child_process_tid);
+
+    // Delete the entry from the hash table, if it exists
+    lock_acquire(&user_processes_lock);
+    hash_delete(&user_processes, &child_to_find.elem);
+    lock_release(&user_processes_lock);
+  }
+
+  // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
+
   // Free the process's resources.
   process_exit();
   thread_exit();
