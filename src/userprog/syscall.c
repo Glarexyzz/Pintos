@@ -1,6 +1,7 @@
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include <hash.h>
 #include <stdio.h>
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
@@ -36,6 +37,7 @@ static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void exit(struct intr_frame *f);
+static void exec(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -126,9 +128,12 @@ static void exec(struct intr_frame *f) {
   // Initialise the hashmap entry
   struct process_status *new_child_status = malloc(sizeof(struct process_status));
   new_child_status->tid = tid;
-  sema_init(new_child_status->sema, 0);
-  new_child_status->status = NULL;
   sema_init(&new_child_status->sema, 0);
+
+  // Add the entry to the hashmap
+  lock_acquire(&user_processes_lock);
+  hash_insert(&user_processes, &new_child_status->elem);
+  lock_release(&user_processes_lock);
 
   // Initialise the tid entry
   struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
