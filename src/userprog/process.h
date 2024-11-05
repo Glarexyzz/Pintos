@@ -1,21 +1,27 @@
 #ifndef USERPROG_PROCESS_H
 #define USERPROG_PROCESS_H
 
+#include "threads/synch.h"
 #include "threads/thread.h"
+#include <hash.h>
+
 
 struct process_status {
   tid_t tid;
   struct semaphore sema;
   int status;
   struct hash_elem elem;
-}
+};
 
 struct process_tid {
   tid_t tid;
   struct list_elem elem;
 };
 
-void user_process_hashmap_init();
+struct hash user_processes;
+struct lock user_processes_lock;
+
+void user_process_hashmap_init(void);
 tid_t process_execute (const char *file_name);
 int process_wait (tid_t);
 void process_exit (void);

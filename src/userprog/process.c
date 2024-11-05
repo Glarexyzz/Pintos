@@ -24,6 +24,7 @@
 struct hash user_processes;
 struct lock user_processes_lock;
 
+void user_process_hashmap_init(void);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 

@@ -115,9 +115,9 @@ static void exit(struct intr_frame *f UNUSED) {
  * Handles exec system calls.
  * @param f The interrupt stack frame
  */
-static pid_t exec(struct intr_frame *f UNUSED) {
+static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
-  const char *cmd_line = ARG(int, 1);
+  const char *cmd_line = ARG(const char *, 1);
 
   // Magic placeholder value
   // TODO: make this be the child process/thread id
@@ -128,13 +128,14 @@ static pid_t exec(struct intr_frame *f UNUSED) {
   new_child_status->tid = tid;
   sema_init(new_child_status->sema, 0);
   new_child_status->status = NULL;
+  sema_init(&new_child_status->sema, 0);
 
   // Initialise the tid entry
   struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
   new_child_tid->tid = tid;
 
   // Add the child tid elem to the current parent process's child_tids list.
-  list_push_back(thread_current().child_tids, new_child_tid.elem);
+  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
 
   //TODO: actually execute the process
 }
