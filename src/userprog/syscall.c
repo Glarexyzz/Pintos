@@ -132,10 +132,16 @@ static void exit_process(int status) {
     list_remove(prev_child);
     free(curr_child_process_tid);
 
-    // Delete the entry from the hash table, if it exists
+    // Delete and free the child from the hash table, if it exists
     lock_acquire(&user_processes_lock);
-    hash_delete(&user_processes, &child_to_find.elem);
+    struct hash_elem *deleted_child = hash_delete(
+      &user_processes,
+      &child_to_find.elem
+    );
     lock_release(&user_processes_lock);
+    if (deleted_child != NULL) {
+      free(deleted_child);
+    }
   }
 
   // Print the exit status
