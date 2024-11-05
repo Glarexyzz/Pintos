@@ -5,7 +5,7 @@
 
 struct process_status {
   tid_t tid;
-  semaphore sema;
+  struct semaphore sema;
   int status;
   struct hash_elem elem;
 }
