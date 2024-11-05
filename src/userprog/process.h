@@ -10,6 +10,11 @@ struct process_status {
   struct hash_elem elem;
 }
 
+struct process_tid {
+  tid_t tid;
+  struct list_elem elem;
+};
+
 void user_process_hashmap_init();
 tid_t process_execute (const char *file_name);
 int process_wait (tid_t);

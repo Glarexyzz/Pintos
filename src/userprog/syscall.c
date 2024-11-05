@@ -3,8 +3,11 @@
 #include "userprog/process.h"
 #include <stdio.h>
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+
 
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
@@ -39,7 +42,7 @@ static void write(struct intr_frame *f);
 const syscall_handler_func syscall_handlers[] = {
   &syscall_not_implemented,
   &exit,
-  &syscall_not_implemented,
+  &exec,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -106,6 +109,34 @@ static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
   exit_process(status);
+}
+
+/**
+ * Handles exec system calls.
+ * @param f The interrupt stack frame
+ */
+static pid_t exec(struct intr_frame *f UNUSED) {
+  // pid_t exec(const char *cmd_line)
+  const char *cmd_line = ARG(int, 1);
+
+  // Magic placeholder value
+  // TODO: make this be the child process/thread id
+  tid_t tid = 50;
+
+  // Initialise the hashmap entry
+  struct process_status *new_child_status = malloc(sizeof(struct process_status));
+  new_child_status->tid = tid;
+  sema_init(new_child_status->sema, 0);
+  new_child_status->status = NULL;
+
+  // Initialise the tid entry
+  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
+  new_child_tid->tid = tid;
+
+  // Add the child tid elem to the current parent process's child_tids list.
+  list_push_back(thread_current().child_tids, new_child_tid.elem);
+
+  //TODO: actually execute the process
 }
 
 /**
