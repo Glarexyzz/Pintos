@@ -1,5 +1,6 @@
 #include "userprog/process.h"
 #include <debug.h>
+#include <hash.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
@@ -16,11 +17,59 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+struct hash user_processes;
+struct lock user_processes_lock;
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+/**
+ * A hash_hash_func for process_status struct.
+ * @param element The pointer to the hash_elem in the process_status struct.
+ * @param aux Unused.
+ * @return The hash of the process_status.
+ */
+static unsigned user_process_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  tid_t tid = hash_entry(element, struct process_status, elem)->tid;
+  return hash_int(tid);
+}
+
+/**
+ * A hash_less_func for process_status struct.
+ * @param a The pointer to the hash_elem in the first process_status struct.
+ * @param b The pointer to the hash_elem in the second process_status struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ */
+static bool user_process_tid_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  tid_t a_tid = hash_entry(a, struct process_status, elem)->tid;
+  tid_t b_tid = hash_entry(b, struct process_status, elem)->tid;
+  return a_tid < b_tid;
+}
+
+/**
+ * Initialises the user_processes hashmap.
+ */
+void user_process_hashmap_init() {
+  hash_init(
+    &user_processes,
+    &user_process_hash,
+    &user_process_tid_smaller,
+    NULL
+  );
+  lock_init(&user_processes_lock);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)

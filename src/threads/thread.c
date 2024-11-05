@@ -782,6 +782,9 @@ init_thread (struct thread *t, const char *name, int priority)
     list_init (&t->locks_acquired);
     t->lock_to_wait = NULL;
   }
+#ifdef USERPROG
+  list_init (&t->child_tids);
+#endif
 
   t->magic = THREAD_MAGIC;
 

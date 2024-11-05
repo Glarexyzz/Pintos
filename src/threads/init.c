@@ -115,6 +115,7 @@ main (void)
   input_init ();
 #ifdef USERPROG
   exception_init ();
+  user_process_hashmap_init();
   syscall_init ();
 #endif
 
