@@ -76,27 +76,18 @@ static void exit_process(int status) {
  * directory provided.
  * @param pd The page directory from which to read.
  * @param uaddr The user address.
- * @return The physical address.
+ * @return The physical address, or NULL if the user address is invalid.
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
- * @remark If an invalid user address is passed, the process will be exited.
+ * @remark If NULL is returned, the caller should free its resources and call exit_process(-1).
  */
 static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
-  // Exit the process if we're not accessing an address in user-space
+  // Return NUll if we're not accessing an address in user-space
   if (!is_user_vaddr(uaddr)) {
-    exit_process(-1);
-    NOT_REACHED();
+	return NULL;
   }
 
-  const void *paddr = pagedir_get_page(pd, uaddr);
-
-  // Exit the process if we're accessing an unmapped address
-  if (paddr == NULL) {
-    exit_process(-1);
-    NOT_REACHED();
-  }
-
-  return paddr;
+  return pagedir_get_page(pd, uaddr);
 }
 
 /**
