@@ -1,8 +1,10 @@
 #include "userprog/syscall.h"
+#include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include <stdio.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
@@ -25,6 +27,8 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
+static void exit_process(int status) NO_RETURN;
+static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
@@ -57,6 +61,36 @@ syscall_init (void)
 }
 
 /**
+ * Exits a user program with the provided status code.
+ * @param status The exit status code.
+ */
+static void exit_process(int status) {
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+  // Free the process's resources.
+  process_exit();
+  thread_exit();
+}
+
+/**
+ * Get the kernel virtual address of a virtual user address from the page
+ * directory provided.
+ * @param pd The page directory from which to read.
+ * @param uaddr The user address.
+ * @return The physical address, or NULL if the user address is invalid.
+ * @remark For safety, do not perform pointer arithmetic on the returned pointer
+ * from this function.
+ * @remark If NULL is returned, the caller should free its resources and call exit_process(-1).
+ */
+static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
+  // Return NUll if we're not accessing an address in user-space
+  if (!is_user_vaddr(uaddr)) {
+	return NULL;
+  }
+
+  return pagedir_get_page(pd, uaddr);
+}
+
+/**
  * Placeholder for unimplemented system calls.
  * @param f The interrupt stack frame
  */
@@ -71,10 +105,7 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-  // Free the process's resources.
-  process_exit();
-  thread_exit();
+  exit_process(status);
 }
 
 /**
