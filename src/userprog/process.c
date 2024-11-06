@@ -222,6 +222,8 @@ process_wait (tid_t child_tid)
 
   // The process is guaranteed to be in the hashmap, since it's only removed by
   // the parent either in process_wait, or when the parent exits
+  ASSERT(process_found_elem != NULL);
+
   struct process_status *process_found = hash_entry(
     process_found_elem,
     struct process_status,
