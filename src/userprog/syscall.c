@@ -37,14 +37,13 @@ static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void exit(struct intr_frame *f);
-static void exec(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
   &syscall_not_implemented,
   &exit,
-  &exec,
+  &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -187,38 +186,6 @@ static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
   exit_process(status);
-}
-
-/**
- * Handles exec system calls.
- * @param f The interrupt stack frame
- */
-static void exec(struct intr_frame *f) {
-  // pid_t exec(const char *cmd_line)
-  const char *cmd_line = ARG(const char *, 1);
-
-  // Magic placeholder value
-  // TODO: make this be the child process/thread id
-  tid_t tid = 50;
-
-  // Initialise the hashmap entry
-  struct process_status *new_child_status = malloc(sizeof(struct process_status));
-  new_child_status->tid = tid;
-  sema_init(&new_child_status->sema, 0);
-
-  // Add the entry to the hashmap
-  lock_acquire(&user_processes_lock);
-  hash_insert(&user_processes, &new_child_status->elem);
-  lock_release(&user_processes_lock);
-
-  // Initialise the tid entry
-  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
-  new_child_tid->tid = tid;
-
-  // Add the child tid elem to the current parent process's child_tids list.
-  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
-
-  //TODO: actually execute the process
 }
 
 /**

@@ -26,6 +26,7 @@ struct hash user_processes;
 struct lock user_processes_lock;
 
 void user_process_hashmap_init(void);
+void register_user_process(tid_t tid);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -73,6 +74,30 @@ void user_process_hashmap_init() {
   lock_init(&user_processes_lock);
 }
 
+/**
+ * Register a new user process for process waiting.
+ * @param tid The thread ID of the new process.
+ * @pre The calling thread is the parent process of the new process.
+ */
+void register_user_process(tid_t tid) {
+  // Initialise the hashmap entry
+  struct process_status *new_child_status = malloc(sizeof(struct process_status));
+  new_child_status->tid = tid;
+  sema_init(&new_child_status->sema, 0);
+
+  // Add the entry to the hashmap
+  lock_acquire(&user_processes_lock);
+  hash_insert(&user_processes, &new_child_status->elem);
+  lock_release(&user_processes_lock);
+
+  // Initialise the tid entry
+  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
+  new_child_tid->tid = tid;
+
+  // Add the child tid elem to the current parent process's child_tids list.
+  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -93,7 +118,10 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+
+  register_user_process(tid);
+
   return tid;
 }
 
