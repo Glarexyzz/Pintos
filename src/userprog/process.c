@@ -81,7 +81,8 @@ void user_process_hashmap_init() {
  */
 void register_user_process(tid_t tid) {
   // Initialise the hashmap entry
-  struct process_status *new_child_status = malloc(sizeof(struct process_status));
+  struct process_status *new_child_status =
+    malloc(sizeof(struct process_status));
   new_child_status->tid = tid;
   sema_init(&new_child_status->sema, 0);
 
@@ -187,7 +188,7 @@ process_wait (tid_t child_tid)
     child_elem = list_begin(&cur_thread->child_tids);
     child_elem != list_end(&cur_thread->child_tids);
     child_elem = list_next(child_elem)
-   ) {
+  ) {
     struct process_tid *child_tid_struct = list_entry(
       child_elem,
       struct process_tid,

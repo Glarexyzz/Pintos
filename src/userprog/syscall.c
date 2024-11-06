@@ -159,7 +159,8 @@ static void exit_process(int status) {
  * @return The physical address, or NULL if the user address is invalid.
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
- * @remark If NULL is returned, the caller should free its resources and call exit_process(-1).
+ * @remark If NULL is returned, the caller should free its resources and call
+ * exit_process(-1).
  */
 static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
