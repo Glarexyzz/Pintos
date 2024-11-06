@@ -220,6 +220,8 @@ process_wait (tid_t child_tid)
     &process_to_find.elem
   );
 
+  lock_release(&user_processes_lock);
+
   // The process is guaranteed to be in the hashmap, since it's only removed by
   // the parent either in process_wait, or when the parent exits
   ASSERT(process_found_elem != NULL);
@@ -229,8 +231,6 @@ process_wait (tid_t child_tid)
     struct process_status,
     elem
   );
-
-  lock_release(&user_processes_lock);
 
   // Wait for the child process to exit - we can down this sema outside of the
   // user_processes_lock, since *only* the current thread has the ability to
