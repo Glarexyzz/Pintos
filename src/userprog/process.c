@@ -1,5 +1,6 @@
 #include "userprog/process.h"
 #include <debug.h>
+#include <hash.h>
 #include <inttypes.h>
 #include <round.h>
 #include <stdio.h>
@@ -15,12 +16,88 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+struct hash user_processes;
+struct lock user_processes_lock;
+
+void user_process_hashmap_init(void);
+void register_user_process(tid_t tid);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+/**
+ * A hash_hash_func for process_status struct.
+ * @param element The pointer to the hash_elem in the process_status struct.
+ * @param aux Unused.
+ * @return The hash of the process_status.
+ */
+static unsigned user_process_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  tid_t tid = hash_entry(element, struct process_status, elem)->tid;
+  return hash_int(tid);
+}
+
+/**
+ * A hash_less_func for process_status struct.
+ * @param a The pointer to the hash_elem in the first process_status struct.
+ * @param b The pointer to the hash_elem in the second process_status struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ */
+static bool user_process_tid_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  tid_t a_tid = hash_entry(a, struct process_status, elem)->tid;
+  tid_t b_tid = hash_entry(b, struct process_status, elem)->tid;
+  return a_tid < b_tid;
+}
+
+/**
+ * Initialises the user_processes hashmap.
+ */
+void user_process_hashmap_init() {
+  hash_init(
+    &user_processes,
+    &user_process_hash,
+    &user_process_tid_smaller,
+    NULL
+  );
+  lock_init(&user_processes_lock);
+}
+
+/**
+ * Register a new user process for process waiting.
+ * @param tid The thread ID of the new process.
+ * @pre The calling thread is the parent process of the new process.
+ */
+void register_user_process(tid_t tid) {
+  // Initialise the hashmap entry
+  struct process_status *new_child_status =
+    malloc(sizeof(struct process_status));
+  new_child_status->tid = tid;
+  sema_init(&new_child_status->sema, 0);
+
+  // Add the entry to the hashmap
+  lock_acquire(&user_processes_lock);
+  hash_insert(&user_processes, &new_child_status->elem);
+  lock_release(&user_processes_lock);
+
+  // Initialise the tid entry
+  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
+  new_child_tid->tid = tid;
+
+  // Add the child tid elem to the current parent process's child_tids list.
+  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -42,7 +119,10 @@ process_execute (const char *file_name)
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+
+  register_user_process(tid);
+
   return tid;
 }
 
@@ -95,11 +175,78 @@ start_process (void *file_name_)
  * This function will be implemented in task 2.
  * For now, it does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid)
 {
-  /* Sleep repeatedly for one second. */
-  for (;;) timer_sleep(TIMER_FREQ);
-  return -1;
+  struct thread *cur_thread = thread_current();
+
+  // Check if the provided tid is in the caller's list of children
+  bool is_child = false;
+  struct list_elem *child_elem;
+
+  // Iterate through the current thread's child thread tids
+  for (
+    child_elem = list_begin(&cur_thread->child_tids);
+    child_elem != list_end(&cur_thread->child_tids);
+    child_elem = list_next(child_elem)
+  ) {
+    struct process_tid *child_tid_struct = list_entry(
+      child_elem,
+      struct process_tid,
+      elem
+    );
+    // If the child's tid matches the tid the caller wants to wait, the wait is
+    // valid
+    if (child_tid_struct->tid == child_tid) {
+      is_child = true;
+      break;
+    }
+  }
+
+  // If the provided tid was not in the caller's list of children, return
+  if (!is_child) return -1;
+
+  // Remove the thread we're waiting for from the list of children, since we can
+  // only wait for a child process once
+  list_remove(child_elem);
+
+  // Find the child process's entry in the user_processes hashmap
+  struct process_status process_to_find;
+  process_to_find.tid = child_tid;
+
+  lock_acquire(&user_processes_lock);
+
+  struct hash_elem *process_found_elem = hash_find(
+    &user_processes,
+    &process_to_find.elem
+  );
+
+  lock_release(&user_processes_lock);
+
+  // The process is guaranteed to be in the hashmap, since it's only removed by
+  // the parent either in process_wait, or when the parent exits
+  ASSERT(process_found_elem != NULL);
+
+  struct process_status *process_found = hash_entry(
+    process_found_elem,
+    struct process_status,
+    elem
+  );
+
+  // Wait for the child process to exit - we can down this sema outside of the
+  // user_processes_lock, since *only* the current thread has the ability to
+  // down this semaphore or delete the hash entry containing the semaphore
+  sema_down(&process_found->sema);
+
+  // Store the child process's exit status
+  int child_status = process_found->status;
+
+  // Delete and free the child from the hash table, if it exists
+  lock_acquire(&user_processes_lock);
+  hash_delete(&user_processes, &process_to_find.elem);
+  lock_release(&user_processes_lock);
+  free(process_found);
+
+  return child_status;
 }
 
 /* Free the current process's resources. */
@@ -107,6 +254,45 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+
+  // When a process exits, we must delete all its child processes from the
+  // user_processes hashmap, since no processes can wait for them anymore
+
+  // Delete all this process's children from the hashmap
+  struct list_elem *curr_child = list_begin(&cur->child_tids);
+
+  // Loop through all the process's children
+  while (curr_child != list_end(&cur->child_tids)) {
+
+    // Get the process_tid struct of the child
+    struct process_tid *curr_child_process_tid = list_entry(
+      curr_child,
+    struct process_tid,
+    elem
+    );
+
+    // Setup to find the child process in the user_processes hashmap
+    struct process_status child_to_find;
+    child_to_find.tid = curr_child_process_tid->tid;
+
+    // Remove the child from the current process's list, and free its struct
+    struct list_elem *prev_child = curr_child;
+    curr_child = list_next(prev_child);
+    list_remove(prev_child);
+    free(curr_child_process_tid);
+
+    // Delete and free the child from the hash table, if it exists
+    lock_acquire(&user_processes_lock);
+    struct hash_elem *deleted_child = hash_delete(
+      &user_processes,
+      &child_to_find.elem
+    );
+    lock_release(&user_processes_lock);
+    if (deleted_child != NULL) {
+      free(deleted_child);
+    }
+  }
+
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back

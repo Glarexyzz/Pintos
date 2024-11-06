@@ -1,10 +1,14 @@
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include <hash.h>
 #include <stdio.h>
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+
 
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
@@ -65,9 +69,48 @@ syscall_init (void)
  * @param status The exit status code.
  */
 static void exit_process(int status) {
+
+  struct thread *cur_thread = thread_current();
+
+  // When a process exits, we must update its exit status in the user_processes
+  // hashmap, and up its semaphore
+
+  // Setup to find the current process in the user_processes hashmap
+  struct process_status process_to_find;
+  process_to_find.tid = cur_thread->tid;
+
+  lock_acquire(&user_processes_lock);
+
+  // Check if this process has an entry in the user_processes hashmap
+  struct hash_elem *process_found_elem = hash_find(
+    &user_processes,
+    &process_to_find.elem
+  );
+
+  // We must keep the user_processes_lock here since the parent of this process
+  // reserves the right to delete the entry corresponding to this process at any
+  // time, possibly while we're modifying it
+
+  // If the process does have an entry
+  if (process_found_elem != NULL) {
+    // Get the process's entry
+    struct process_status *process_found = hash_entry(
+      process_found_elem,
+      struct process_status,
+      elem
+    );
+
+    // Update the entry's exit status and up its semaphore to unblock its waiter
+    process_found->status = status;
+    sema_up(&process_found->sema);
+  }
+
+  lock_release(&user_processes_lock);
+
+  // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
+
   // Free the process's resources.
-  process_exit();
   thread_exit();
 }
 
@@ -79,7 +122,8 @@ static void exit_process(int status) {
  * @return The physical address, or NULL if the user address is invalid.
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
- * @remark If NULL is returned, the caller should free its resources and call exit_process(-1).
+ * @remark If NULL is returned, the caller should free its resources and call
+ * exit_process(-1).
  */
 static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
