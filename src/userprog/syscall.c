@@ -92,6 +92,10 @@ static void exit_process(int status) {
     &process_to_find.elem
   );
 
+  // We must keep the user_processes_lock here since the parent of this process
+  // reserves the right to delete the entry corresponding to this process at any
+  // time, possibly while we're modifying it
+
   // If the process does have an entry
   if (process_found_elem != NULL) {
     // Get the process's entry
