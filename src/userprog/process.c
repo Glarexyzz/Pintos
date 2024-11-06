@@ -16,6 +16,7 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
@@ -145,11 +146,76 @@ start_process (void *file_name_)
  * This function will be implemented in task 2.
  * For now, it does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid)
 {
-  /* Sleep repeatedly for one second. */
-  for (;;) timer_sleep(TIMER_FREQ);
-  return -1;
+  struct thread *cur_thread = thread_current();
+
+  // Check if the provided tid is in the caller's list of children
+  bool is_child = false;
+  struct list_elem *child_elem;
+
+  // Iterate through the current thread's child thread tids
+  for (
+    child_elem = list_begin(&cur_thread->child_tids);
+    child_elem != list_end(&cur_thread->child_tids);
+    child_elem = list_next(child_elem)
+   ) {
+    struct process_tid *child_tid_struct = list_entry(
+      child_elem,
+      struct process_tid,
+      elem
+    );
+    // If the child's tid matches the tid the caller wants to wait, the wait is
+    // valid
+    if (child_tid_struct->tid == child_tid) {
+      is_child = true;
+      break;
+    }
+  }
+
+  // If the provided tid was not in the caller's list of children, return
+  if (!is_child) return -1;
+
+  // Remove the thread we're waiting for from the list of children, since we can
+  // only wait for a child process once
+  list_remove(child_elem);
+
+  // Find the child process's entry in the user_processes hashmap
+  struct process_status process_to_find;
+  process_to_find.tid = child_tid;
+
+  lock_acquire(&user_processes_lock);
+
+  struct hash_elem *process_found_elem = hash_find(
+    &user_processes,
+    &process_to_find.elem
+  );
+
+  // The process is guaranteed to be in the hashmap, since it's only removed by
+  // the parent either in process_wait, or when the parent exits
+  struct process_status *process_found = hash_entry(
+    process_found_elem,
+    struct process_status,
+    elem
+  );
+
+  lock_release(&user_processes_lock);
+
+  // Wait for the child process to exit - we can down this sema outside of the
+  // user_processes_lock, since *only* the current thread has the ability to
+  // down this semaphore or delete the hash entry containing the semaphore
+  sema_down(&process_found->sema);
+
+  // Store the child process's exit status
+  int child_status = process_found->status;
+
+  // Delete and free the child from the hash table, if it exists
+  lock_acquire(&user_processes_lock);
+  hash_delete(&user_processes, &process_to_find.elem);
+  lock_release(&user_processes_lock);
+  free(process_found);
+
+  return child_status;
 }
 
 /* Free the current process's resources. */
