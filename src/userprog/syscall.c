@@ -151,7 +151,6 @@ static void exit_process(int status) {
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
   // Free the process's resources.
-  process_exit();
   thread_exit();
 }
 
