@@ -585,7 +585,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
    As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
    local copy (including space for the nul terminator), excluding the
    filename after any possible delimitors. */
-  char file_name_copy[MAX_FILENAME_LENGTH + 1];
+  char executable_name[MAX_FILENAME_LENGTH + 1];
   int len_to_copy = MAX_FILENAME_LENGTH + 1;
   char *first_delim = strchr(file_name, ' ');
   // Include the nul terminator in the calculation of the length before the
@@ -594,12 +594,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (first_delim != NULL) len_before_space = first_delim - file_name + 1;
   if (len_before_space < len_to_copy) len_to_copy = len_before_space;
   // Copy the filename, including the nul terminator.
-  strlcpy(file_name_copy, file_name, len_to_copy);
+  strlcpy(executable_name, file_name, len_to_copy);
 
-  file = filesys_open (file_name_copy);
+  file = filesys_open (executable_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", executable_name);
       goto done; 
     }
 
@@ -612,7 +612,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", executable_name);
       goto done; 
     }
 
