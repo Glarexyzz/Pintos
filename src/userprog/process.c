@@ -289,14 +289,6 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
-  // TODO: Pass all arguments, not just filename.
-  for (int i = 0; file_name[i] != '\0'; i++) {
-    if (file_name[i] == ' ') {
-      file_name[i] = '\0';
-      break;
-    }
-  }
-
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -679,6 +671,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  struct pass_args_data pass_args_data;
+  // For the first pass, determine if parsing is successful, and if so,
+  // record auxiliary data to be used for the second pass.
+  if (!parse_argument_string(file_name, esp, &pass_args_data))
+    goto done;
+  // On the second pass, use this auxiliary data to copy onto the stack.
+  // If the first parse was successful, the second needs to be as well.
+  ASSERT(parse_argument_string(file_name, NULL, &pass_args_data));
+
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
@@ -825,7 +826,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
