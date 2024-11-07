@@ -5,6 +5,8 @@
 #include "threads/thread.h"
 #include <hash.h>
 
+/// The maximum length of a file that can be opened.
+#define MAX_FILENAME_LENGTH 14
 
 struct process_status {
   tid_t tid;
