@@ -294,7 +294,11 @@ process_exit (void)
     );
     lock_release(&user_processes_lock);
     if (deleted_child != NULL) {
-      free(deleted_child);
+      free(hash_entry(
+        deleted_child,
+        struct process_status,
+        elem
+      ));
     }
   }
 
