@@ -50,8 +50,7 @@ waiter_list_pop (struct list *thread_list)
 {
   ASSERT (!list_empty (thread_list));
   struct list_elem *max_priority_elem;
-  max_priority_elem = thread_mlfqs ? list_front (thread_list)
-    : list_max (thread_list, thread_lower_priority, NULL);
+  max_priority_elem = list_max (thread_list, thread_lower_priority, NULL);
   list_remove (max_priority_elem);
   return list_entry (max_priority_elem, struct thread, elem);
 }
