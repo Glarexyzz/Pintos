@@ -30,6 +30,14 @@ void register_user_process(tid_t tid);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
+/* Structure used for argument passing. */
+struct pass_args_data {
+  /* The destination of argument pointers to be written on the stack. */
+  char **ptrs_dest;
+  /* The destination of the argument strings to be written on the stack. */
+  char *params_dest;
+};
+
 /**
  * A hash_hash_func for process_status struct.
  * @param element The pointer to the hash_elem in the process_status struct.
