@@ -272,8 +272,8 @@ process_exit (void)
     // Get the process_tid struct of the child
     struct process_tid *curr_child_process_tid = list_entry(
       curr_child,
-    struct process_tid,
-    elem
+      struct process_tid,
+      elem
     );
 
     // Setup to find the child process in the user_processes hashmap
