@@ -250,7 +250,7 @@ thread_tick (void)
       thread_foreach(&update_recent_cpu, NULL);
     }
 
-    if ((timer_ticks() & 4) == 4) {
+    if (timer_ticks() % TIME_SLICE == 0) {
       // Update priority for all threads which need it
       struct list_elem *cur_elem = list_begin(&update_pri_list);
       while (cur_elem != list_end(&update_pri_list)) {
