@@ -435,8 +435,22 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* Open executable file. */
-  file = filesys_open (file_name);
+  /* Open executable file.
+   As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
+   local copy (including space for the nul terminator), excluding the
+   filename after any possible delimitors. */
+  char file_name_copy[MAX_FILENAME_LENGTH + 1];
+  int len_to_copy = MAX_FILENAME_LENGTH + 1;
+  char *first_delim = strchr(file_name, ' ');
+  // Include the nul terminator in the calculation of the length before the
+  // first delimiter, in case the file_name has leading spaces.
+  int len_before_space = len_to_copy;
+  if (first_delim != NULL) len_before_space = first_delim - file_name + 1;
+  if (len_before_space < len_to_copy) len_to_copy = len_before_space;
+  // Copy the filename, including the nul terminator.
+  strlcpy(file_name_copy, file_name, len_to_copy);
+
+  file = filesys_open (file_name_copy);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
