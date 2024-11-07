@@ -39,6 +39,152 @@ struct pass_args_data {
 };
 
 /**
+ * Pushes (and copies) 4 bytes from the given address onto the stack.
+ * @pre Both the stack pointer esp and the pointer to data are non-NULL,
+ * and there is enough space in the current page to write to the stack.
+ * @param esp The stack pointer.
+ * @param data The generic pointer to be written to the stack.
+ * @example \code
+ * void push_two(void **esp) {
+ *     int two = 2;
+ *     push_to_stack(esp, &two);
+ *     ASSERT(*(int *)*esp == 2);
+ * }
+ * \endcode
+ */
+static void stack_push(void **esp, void *data) {
+  ASSERT(esp != NULL);
+  ASSERT(data != NULL);
+  ASSERT(*esp != NULL);
+  *esp -= sizeof(uint32_t);
+  *(uint32_t *)*esp = *(uint32_t *)data;
+}
+
+/**
+ * Helper function for passing arguments onto the stack.
+ * The function is called twice to parse the given filename, delimited by
+ * spaces, in two passes.
+ * If the arguments cannot fit in one page, then this function returns false.
+ * By this method, the arguments will exclude leading and trailing whitespace
+ * from the original file_name, and skip consecutive spaces when delimited.
+ * On the first pass, dest_stack is taken to be non-NULL, and the function will
+ * decrement the stack by the amount needed to store the space for the
+ * arguments (including copies of the strings and the NULL return address), and
+ * record auxiliary data storing the destination of arguments and delimited
+ * strings on the stack to the struct data.
+ * On the second pass, dest_stack is taken to be NULL, and the function will
+ * make a second pass over the string, reading the values stored in the struct
+ * data, and copying the strings onto the stack, as well as their associated
+ * basal pointers.
+ * @pre When copying onto the stack, the stack must contain enough space to
+ * store all the arguments in one page. Otherwise, the stack must initially
+ * point to PHYS_BASE.
+ * @param args_to_split The (unsplit) arguments to be passed onto the stack.
+ * @param esp The (possibly NULL) stack pointer, as detailed above. If esp is
+ * not NULL, it must point to a valid pointer taken to be the bottom of the
+ * stack.
+ * @param data The auxiliary data to populate and read between the two passes.
+ * @return `true` if and only if the arguments fit within PGSIZE bytes.
+ */
+static bool parse_argument_string(
+  const char *args_to_split,
+  void **esp,
+  struct pass_args_data *data
+) {
+  // Check the preconditions for arguments
+  ASSERT(args_to_split != NULL);
+  ASSERT(esp == NULL || (*esp != NULL && *esp == PHYS_BASE));
+  ASSERT(data != NULL);
+  int argc = 0;
+  // The number of non-space characters in the input string
+  int len = 0;
+  const char *cur = args_to_split;
+  // (1st pass) Find all words in the input string
+  while (true) {
+    // Skip past whitespace
+    if (*cur == '\0') break;
+    while (*cur != '\0' && *cur == ' ') {
+      cur++;
+    }
+
+    // Do not include trailing or leading whitespace in our count
+    if (*cur == '\0') break;
+
+    // At this point we have found another argument;
+    // record its length and location (1st pass)
+    // or write to the stack (2nd pass)
+    char *arg_begin = &data->params_dest[len + argc];
+    while (*cur != '\0' && *cur != ' ') {
+      if (esp == NULL) {
+        // (2nd pass) Copy the argument to the stack
+        data->params_dest[len + argc] = *cur;
+      }
+      cur++;
+      len++;
+    }
+
+    // (2nd pass) Add nul terminator to the end of the argument
+    // and the pointer to the argument (on the stack) to the argv array
+    if (esp == NULL) {
+      data->params_dest[len + argc] = '\0';
+      data->ptrs_dest[argc] = arg_begin;
+    }
+
+    // Move to the next argument
+    argc++;
+  }
+
+  // (2nd pass) Write the NULL sentinel at the end of argv,
+  // and the pass is now done.
+  if (esp == NULL) {
+    data->ptrs_dest[argc] = NULL;
+    return true;
+  }
+
+  /* The maximum (bottommost) region allocated for the stack within the same
+     page. */
+  void *esp_min = *esp - PGSIZE;
+
+  /* The space needed for strings is (argc - 1) space separators,
+   * plus `len` non-space characters, plus 1 for the nul terminator. */
+  len += argc;
+
+  // Align to 4 bytes.
+  int word_align = len % sizeof(uint32_t);
+  if (word_align) {
+    len += sizeof(uint32_t) - word_align;
+  }
+
+  // Leave space onto the stack for the strings to be copied, if possible.
+  if (*esp - len <= esp_min) return false;
+  *esp -= len;
+  data->params_dest = (char *) *esp;
+
+  /* Ensure there is extra space for the argv pointers (including the NULL
+     sentinel at the end of the argv array), as well as three values as per
+     80x86 calling convention for calling `int main(int argc, char **argv)`:
+     - the basal pointer to argv,
+     - the value of argc, and
+     - the NULL return address. */
+  int argv_len, calling_conv_len;
+  argv_len = (argc + 1) * sizeof(uint32_t);
+  calling_conv_len = 3 * sizeof(uint32_t);
+
+  if (*esp - argv_len <= esp_min) return false;
+  *esp -= argv_len;
+  data->ptrs_dest = *esp;
+
+  if (*esp - calling_conv_len <= esp_min) return false;
+
+  // At this point we can successfully push all the values onto the stack
+  stack_push(esp, &data->ptrs_dest);
+  stack_push(esp, &argc);
+  void (**return_address) (void) = NULL;
+  stack_push(esp, &return_address);
+  return true;
+}
+
+/**
  * A hash_hash_func for process_status struct.
  * @param element The pointer to the hash_elem in the process_status struct.
  * @param aux Unused.
