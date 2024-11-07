@@ -208,6 +208,11 @@ process_wait (tid_t child_tid)
   // Remove the thread we're waiting for from the list of children, since we can
   // only wait for a child process once
   list_remove(child_elem);
+  free(list_entry(
+    child_elem,
+    struct process_tid,
+    elem
+  ));
 
   // Find the child process's entry in the user_processes hashmap
   struct process_status process_to_find;
@@ -267,8 +272,8 @@ process_exit (void)
     // Get the process_tid struct of the child
     struct process_tid *curr_child_process_tid = list_entry(
       curr_child,
-    struct process_tid,
-    elem
+      struct process_tid,
+      elem
     );
 
     // Setup to find the child process in the user_processes hashmap
@@ -289,7 +294,11 @@ process_exit (void)
     );
     lock_release(&user_processes_lock);
     if (deleted_child != NULL) {
-      free(deleted_child);
+      free(hash_entry(
+        deleted_child,
+        struct process_status,
+        elem
+      ));
     }
   }
 
