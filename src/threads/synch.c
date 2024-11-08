@@ -39,12 +39,14 @@ static void lock_update_lower_max_priority (struct lock *lock);
 /**
  * Removes an element from a list of waiting threads.
  * Panics if the list is empty.
+ * This function must be called with interrupts disabled.
  * @param thread_list the list to pop from
  * @return the thread with the maximum priority.
  */
 static struct thread *
 waiter_list_pop (struct list *thread_list)
 {
+  ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (!list_empty (thread_list));
   struct list_elem *max_priority_elem;
   max_priority_elem = list_max (thread_list, thread_lower_priority, NULL);
