@@ -38,6 +38,7 @@ static void syscall_handler (struct intr_frame *);
 static void syscall_not_implemented(struct intr_frame *f);
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
+static void wait(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -45,7 +46,7 @@ const syscall_handler_func syscall_handlers[] = {
   &syscall_not_implemented,
   &exit,
   &exec,
-  &syscall_not_implemented,
+  &wait,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -161,6 +162,16 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   char *cmd_line = ARG(char *, 1);
   f->eax = process_execute(cmd_line);
+}
+
+/**
+ * Handles wait system calls.
+ * @param f The interrupt stack frame
+ */
+static void wait(struct intr_frame *f) {
+  // void wait(pid_t pid)
+  int pid = ARG(int, 1);
+  f->eax = process_wait(pid);
 }
 
 /**
