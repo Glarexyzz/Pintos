@@ -1,3 +1,4 @@
+#include "devices/shutdown.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -36,6 +37,7 @@ static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
+static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
@@ -43,7 +45,7 @@ static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
-  &syscall_not_implemented,
+  &halt,
   &exit,
   &exec,
   &wait,
@@ -142,6 +144,15 @@ static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
  */
 static void syscall_not_implemented(struct intr_frame *f UNUSED) {
   printf("System call not implemented.\n");
+}
+
+/**
+ * Handles halt system calls.
+ * @param f The interrupt stack frame
+ */
+static void halt(struct intr_frame *f UNUSED) {
+  // void halt(void)
+  shutdown_power_off();
 }
 
 /**
