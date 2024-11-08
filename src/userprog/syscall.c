@@ -158,7 +158,7 @@ static void exit(struct intr_frame *f UNUSED) {
  * @param f The interrupt stack frame
  */
 static void wait(struct intr_frame *f) {
-  // void exit(int status)
+  // void wait(pid_t pid)
   int pid = ARG(int, 1);
   f->eax = process_wait(pid);
 }
