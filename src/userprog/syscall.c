@@ -1,3 +1,4 @@
+#include "devices/shutdown.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -36,15 +37,18 @@ static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
+static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
+static void exec(struct intr_frame *f);
+static void wait(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
-  &syscall_not_implemented,
+  &halt,
   &exit,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
+  &exec,
+  &wait,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -143,6 +147,15 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
 }
 
 /**
+ * Handles halt system calls.
+ * @param f The interrupt stack frame
+ */
+static void halt(struct intr_frame *f UNUSED) {
+  // void halt(void)
+  shutdown_power_off();
+}
+
+/**
  * Handles exit system calls.
  * @param f The interrupt stack frame
  */
@@ -150,6 +163,26 @@ static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   int status = ARG(int, 1);
   exit_process(status);
+}
+
+/**
+ * Handles exec system calls.
+ * @param f The interrupt stack frame
+ */
+static void exec(struct intr_frame *f) {
+  // pid_t exec(const char *cmd_line)
+  char *cmd_line = ARG(char *, 1);
+  f->eax = process_execute(cmd_line);
+}
+
+/**
+ * Handles wait system calls.
+ * @param f The interrupt stack frame
+ */
+static void wait(struct intr_frame *f) {
+  // void wait(pid_t pid)
+  int pid = ARG(int, 1);
+  f->eax = process_wait(pid);
 }
 
 /**
