@@ -41,9 +41,6 @@ static void lock_update_lower_max_priority (struct lock *lock);
  * Panics if the list is empty.
  * @param thread_list the list to pop from
  * @return the thread with the maximum priority.
- * @remark In the priority scheduler, this list need not be sorted, and as such
- * the operation takes O(n) time in the number of threads. In the MLFQ
- * scheduler, the first element in the list is removed, which takes O(1) time.
  */
 static struct thread *
 waiter_list_pop (struct list *thread_list)
