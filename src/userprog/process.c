@@ -269,9 +269,10 @@ process_execute (const char *file_name)
   char *first_delim = strchr(file_name, ' ');
   // Include the null terminator in the calculation of the length before the
   // first delimiter, in case the file_name has leading spaces.
-  int len_before_space = len_to_copy;
-  if (first_delim != NULL) len_before_space = first_delim - file_name + 1;
-  if (len_before_space < len_to_copy) len_to_copy = len_before_space;
+  if (first_delim != NULL) {
+    int len_before_space = first_delim - file_name + 1;
+    if (len_before_space < len_to_copy) len_to_copy = len_before_space;
+  }
   // Copy the filename, including the null terminator.
   strlcpy(executable_name, file_name, len_to_copy);
 
