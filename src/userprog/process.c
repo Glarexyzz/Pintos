@@ -879,26 +879,25 @@ static bool
 setup_stack (void **esp, const char* file_name)
 {
   uint8_t *kpage;
-  bool success = false;
-
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (!success) goto fail;
+      if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true))
+        goto fail;
       *esp = PHYS_BASE;
       struct pass_args_data pass_args_data;
-      success = parse_argument_string(file_name, esp, &pass_args_data);
-      if (!success) goto fail;
-      success = parse_argument_string(file_name, NULL, &pass_args_data);
+      if (!parse_argument_string(file_name, esp, &pass_args_data))
+        goto fail;
+      bool second_pass;
+      second_pass = parse_argument_string(file_name, NULL, &pass_args_data);
       // If the first parse was successful, the second needs to be as well.
-      ASSERT(success);
+      ASSERT(second_pass);
     }
-  return success;
+  return true;
 
  fail:
   palloc_free_page(kpage);
-  return success;
+  return false;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
