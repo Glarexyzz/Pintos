@@ -483,6 +483,10 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
 
   intr_set_level (old_level);
+
+  if (thread_current()->priority < t->priority && old_level == INTR_ON) {
+    thread_yield();
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -617,9 +621,20 @@ thread_set_priority (int new_priority)
     }
   }
 
+  int ready_highest_priority = PRI_MIN;
+  if (!list_empty(&ready_list)) {
+    ready_highest_priority = list_entry(
+      list_back(&ready_list),
+      struct thread,
+      elem
+    )->priority;
+  }
+
   intr_set_level (old_level);
 
-  if (old_level == INTR_ON)
+  if (old_level == INTR_OFF) return;
+
+  if (current_thread->priority < ready_highest_priority)
     thread_yield ();
 }
 
