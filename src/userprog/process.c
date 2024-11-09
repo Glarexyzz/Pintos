@@ -242,6 +242,27 @@ void register_user_process(tid_t tid) {
   list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
 }
 
+/**
+ * Copies the first word of file_name, which is the executable name that has a
+ * max length of MAX_FILENAME_LENGTH.
+ * @param file_name A String containing the executable name and arguments.
+ * @param executable_name A buffer of size MAX_FILENAME_LENGTH + 1 to where the
+ * executable name will be copied.
+ */
+static void copy_executable_name(const char *file_name, char *executable_name) {
+  while (*file_name == ' ') file_name++;
+  int len_to_copy = MAX_FILENAME_LENGTH + 1;
+  char *first_delim = strchr(file_name, ' ');
+  // Include the null terminator in the calculation of the length before the
+  // first delimiter, in case the file_name has leading spaces.
+  if (first_delim != NULL) {
+    int len_before_space = first_delim - file_name + 1;
+    if (len_before_space < len_to_copy) len_to_copy = len_before_space;
+  }
+  // Copy the filename, including the null terminator.
+  strlcpy(executable_name, file_name, len_to_copy);
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -259,22 +280,8 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  /* Open executable file.
-   As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
-   local copy (including space for the null terminator), excluding the
-   filename after any possible delimiters. */
   char executable_name[MAX_FILENAME_LENGTH + 1];
-  while (*file_name == ' ') file_name++;
-  int len_to_copy = MAX_FILENAME_LENGTH + 1;
-  char *first_delim = strchr(file_name, ' ');
-  // Include the null terminator in the calculation of the length before the
-  // first delimiter, in case the file_name has leading spaces.
-  if (first_delim != NULL) {
-    int len_before_space = first_delim - file_name + 1;
-    if (len_before_space < len_to_copy) len_to_copy = len_before_space;
-  }
-  // Copy the filename, including the null terminator.
-  strlcpy(executable_name, file_name, len_to_copy);
+  copy_executable_name(file_name, executable_name);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (executable_name, PRI_DEFAULT, start_process, fn_copy);
@@ -581,11 +588,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
-  /* Open executable file.
-     As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
-     local copy (including space for the null terminator), excluding the
-     filename after any possible delimiters. */
-  const char *executable_name = thread_current()->name;
+  /* Open executable file. */
+  char executable_name[MAX_FILENAME_LENGTH + 1];
+  copy_executable_name(file_name, executable_name);
 
   file = filesys_open (executable_name);
   if (file == NULL) 
