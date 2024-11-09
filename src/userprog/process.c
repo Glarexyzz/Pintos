@@ -137,7 +137,7 @@ static bool parse_argument_string(
 
   // Align to 4 bytes.
   int word_align = len % sizeof(uint32_t);
-  if (word_align) {
+  if (word_align != 0) {
     len += sizeof(uint32_t) - word_align;
   }
 
