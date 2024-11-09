@@ -25,6 +25,8 @@
 struct hash user_processes;
 struct lock user_processes_lock;
 
+struct lock file_system_lock;
+
 static unsigned user_process_hash(
   const struct hash_elem *element,
   void *aux UNUSED
@@ -176,6 +178,13 @@ static bool fd_smaller(
   int a_fd = hash_entry(a, struct fd_entry, elem)->fd;
   int b_fd = hash_entry(b, struct fd_entry, elem)->fd;
   return a_fd < b_fd;
+}
+
+/**
+* Initialises the file system lock.
+*/
+void file_system_lock_init() {
+  lock_init(&file_system_lock);
 }
 
 /* A thread function that loads a user process and starts it

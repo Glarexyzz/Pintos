@@ -78,7 +78,9 @@ syscall_init (void)
 */
 void close_file(struct hash_elem *element, void *aux UNUSED) {
   struct fd_entry *fd_entry = hash_entry(element, struct fd_entry, elem);
+  lock_acquire(&file_system_lock);
   file_close(fd_entry->file);
+  lock_release(&file_system_lock);
   free(fd_entry);
 }
 
