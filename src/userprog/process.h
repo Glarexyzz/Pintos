@@ -18,6 +18,12 @@ struct process_tid {
   struct list_elem elem;
 };
 
+struct fd_entry {
+  int fd;
+  struct file *file;
+  struct hash_elem elem;
+};
+
 struct hash user_processes;
 struct lock user_processes_lock;
 

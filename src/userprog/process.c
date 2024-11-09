@@ -128,6 +128,37 @@ process_execute (const char *file_name)
   return tid;
 }
 
+/**
+ * A hash_hash_func for fd_table struct.
+ * @param element The pointer to the hash_elem in the fd_table struct.
+ * @param aux Unused.
+ * @return The hash of the fd_table.
+ */
+static unsigned fd_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  int fd = hash_entry(element, struct fd_entry, elem)->fd;
+  return hash_int(fd);
+}
+
+/**
+ * A hash_less_func for fd_table struct.
+ * @param a The pointer to the hash_elem in the first fd_table struct.
+ * @param b The pointer to the hash_elem in the second fd_table struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ */
+static bool fd_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  int a_fd = hash_entry(a, struct fd_entry, elem)->fd;
+  int b_fd = hash_entry(b, struct fd_entry, elem)->fd;
+  return a_fd < b_fd;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void
@@ -156,6 +187,12 @@ start_process (void *file_name_)
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
+
+  // Initialise the file descriptor table.
+  success = hash_init(thread_current()->fd_table, fd_hash, fd_smaller, NULL);
+   if (!success)
+    thread_exit ();
+  thread_current()->fd_counter = 2;
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
