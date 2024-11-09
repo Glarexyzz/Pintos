@@ -109,7 +109,7 @@ static bool parse_argument_string(
       len++;
     }
 
-    // (2nd pass) Add nul terminator to the end of the argument
+    // (2nd pass) Add null terminator to the end of the argument
     // and the pointer to the argument (on the stack) to the argv array
     if (esp == NULL) {
       data->params_dest[len + argc] = '\0';
@@ -132,7 +132,7 @@ static bool parse_argument_string(
   void *esp_min = *esp - PGSIZE;
 
   /* The space needed for strings is (argc - 1) space separators,
-   * plus `len` non-space characters, plus 1 for the nul terminator. */
+   * plus `len` non-space characters, plus 1 for the null terminator. */
   len += argc;
 
   // Align to 4 bytes.
@@ -258,18 +258,18 @@ process_execute (const char *file_name)
 
   /* Open executable file.
    As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
-   local copy (including space for the nul terminator), excluding the
-   filename after any possible delimitors. */
+   local copy (including space for the null terminator), excluding the
+   filename after any possible delimiters. */
   char executable_name[MAX_FILENAME_LENGTH + 1];
   while (*file_name == ' ') file_name++;
   int len_to_copy = MAX_FILENAME_LENGTH + 1;
   char *first_delim = strchr(file_name, ' ');
-  // Include the nul terminator in the calculation of the length before the
+  // Include the null terminator in the calculation of the length before the
   // first delimiter, in case the file_name has leading spaces.
   int len_before_space = len_to_copy;
   if (first_delim != NULL) len_before_space = first_delim - file_name + 1;
   if (len_before_space < len_to_copy) len_to_copy = len_before_space;
-  // Copy the filename, including the nul terminator.
+  // Copy the filename, including the null terminator.
   strlcpy(executable_name, file_name, len_to_copy);
 
   /* Create a new thread to execute FILE_NAME. */
@@ -578,9 +578,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file.
-   As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
-   local copy (including space for the nul terminator), excluding the
-   filename after any possible delimitors. */
+     As filename sizes are limited to `MAX_FILENAME_LENGTH` bytes, store a
+     local copy (including space for the null terminator), excluding the
+     filename after any possible delimiters. */
   const char *executable_name = thread_current()->name;
 
   file = filesys_open (executable_name);
