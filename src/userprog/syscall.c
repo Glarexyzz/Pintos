@@ -1,4 +1,5 @@
 #include "devices/shutdown.h"
+#include "filesys/file.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -32,6 +33,7 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
+void close_file(struct hash_elem *element, void *aux UNUSED);
 static void exit_process(int status) NO_RETURN;
 static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
@@ -66,6 +68,20 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
+
+/**
+* The hash_action_func used to close the file in fd_entry struct and free the
+* memory.
+* @param element The hash_elem of the file descriptor in the fd table.
+* @param aux (UNUSED).
+*/
+void close_file(struct hash_elem *element, void *aux UNUSED) {
+  struct fd_entry *fd_entry = hash_entry(element, struct fd_entry, elem);
+  lock_acquire(&file_system_lock);
+  file_close(fd_entry->file);
+  lock_release(&file_system_lock);
+  free(fd_entry);
 }
 
 /**
@@ -110,6 +126,11 @@ static void exit_process(int status) {
   }
 
   lock_release(&user_processes_lock);
+
+  // Close all the files and free all the file descriptors,
+  // and the file descriptor table
+  struct hash *fd_table = cur_thread->fd_table;
+  hash_destroy(fd_table, &close_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);

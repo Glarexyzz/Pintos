@@ -2,6 +2,7 @@
 #define THREADS_THREAD_H
 
 #include <debug.h>
+#include <hash.h>
 #include <list.h>
 #include <stdint.h>
 
@@ -107,6 +108,8 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list child_tids;             /* Children processes. */
+    struct hash *fd_table;              /* File descriptor table. */
+    int fd_counter;                     /* Counter for allocating file descriptor number. */
 #endif
 
     /* Owned by thread.c. */

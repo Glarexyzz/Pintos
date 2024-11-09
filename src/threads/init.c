@@ -116,6 +116,7 @@ main (void)
 #ifdef USERPROG
   exception_init ();
   user_process_hashmap_init();
+  file_system_lock_init();
   syscall_init ();
 #endif
 
