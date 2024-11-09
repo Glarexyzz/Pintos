@@ -25,8 +25,27 @@
 struct hash user_processes;
 struct lock user_processes_lock;
 
+static unsigned user_process_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
+static bool user_process_tid_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
 void user_process_hashmap_init(void);
 void register_user_process(tid_t tid);
+
+static unsigned fd_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
+static bool fd_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
