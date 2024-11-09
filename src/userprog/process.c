@@ -22,6 +22,9 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+/// The maximum length of the name of a file that can be opened.
+#define MAX_FILENAME_LENGTH 14
+
 struct hash user_processes;
 struct lock user_processes_lock;
 
@@ -50,6 +53,146 @@ static bool fd_smaller(
 );
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
+/* Structure used for argument passing. */
+struct pass_args_data {
+  /* The destination of argument pointers to be written on the stack. */
+  char **ptrs_dest;
+  /* The destination of the argument strings to be written on the stack. */
+  char *params_dest;
+};
+
+/**
+ * Pushes (and copies) 4 bytes from the given address onto the stack.
+ * @pre Both the stack pointer esp and the pointer to data are non-NULL,
+ * and there is enough space in the current page to write to the stack.
+ * @param esp The stack pointer.
+ * @param data The generic pointer to be written to the stack.
+ * @example \code
+ * void push_two(void **esp) {
+ *     int two = 2;
+ *     push_to_stack(esp, &two);
+ *     ASSERT(*(int *)*esp == 2);
+ * }
+ * \endcode
+ */
+static void stack_push(void **esp, void *data) {
+  ASSERT(esp != NULL);
+  ASSERT(data != NULL);
+  ASSERT(*esp != NULL);
+  *esp -= sizeof(uint32_t);
+  *(uint32_t *)*esp = *(uint32_t *)data;
+}
+
+/**
+ * The functions is called twice to parse the given filename, delimited by
+ * spaces, to put on the stack.
+ * In the first pass, it decrements the stack pointer and pushes char **argv,
+ * argc, and the NULL return address.
+ * In the second pass, it pushes the argv pointers and their corresponding
+ * arguments.
+ * @param args_to_split The (unsplit) arguments to be passed onto the stack.
+ * @param esp The (possibly NULL) stack pointer. If esp is not NULL, it must
+ * point to a valid pointer taken to be PHYS_BASE. esp should be null in the
+ * second pass.
+ * @param data The auxiliary data to set in the first pass and populate in the
+ * second.
+ * @return `true` if and only if the arguments fit within PGSIZE bytes.
+ */
+static bool parse_argument_string(
+  const char *args_to_split,
+  void **esp,
+  struct pass_args_data *data
+) {
+  // Check the preconditions for arguments
+  ASSERT(args_to_split != NULL);
+  ASSERT(esp == NULL || (*esp != NULL && *esp == PHYS_BASE));
+  ASSERT(data != NULL);
+  int argc = 0;
+  // The number of non-space characters in the input string
+  int len = 0;
+  const char *cur = args_to_split;
+  // (1st pass) Find all words in the input string
+  while (true) {
+    // Skip past whitespace
+    while (*cur == ' ') cur++;
+
+    // Do not include trailing or leading whitespace in our count
+    if (*cur == '\0') break;
+
+    // At this point we have found another argument;
+    // record its length and location (1st pass)
+    // or write to the stack (2nd pass)
+    char *arg_begin = &data->params_dest[len + argc];
+    while (*cur != '\0' && *cur != ' ') {
+      if (esp == NULL) {
+        // (2nd pass) Copy the argument to the stack
+        data->params_dest[len + argc] = *cur;
+      }
+      cur++;
+      len++;
+    }
+
+    // (2nd pass) Add null terminator to the end of the argument
+    // and the pointer to the argument (on the stack) to the argv array
+    if (esp == NULL) {
+      data->params_dest[len + argc] = '\0';
+      data->ptrs_dest[argc] = arg_begin;
+    }
+
+    // Move to the next argument
+    argc++;
+  }
+
+  // (2nd pass) Write the NULL sentinel at the end of argv,
+  // and the pass is now done.
+  if (esp == NULL) {
+    data->ptrs_dest[argc] = NULL;
+    return true;
+  }
+
+  /* The maximum (bottommost) region allocated for the stack within the same
+     page. */
+  void *esp_min = *esp - PGSIZE;
+
+  /* The space needed for strings is (argc - 1) space separators,
+   * plus `len` non-space characters, plus 1 for the null terminator. */
+  len += argc;
+
+  // Align to 4 bytes.
+  int word_align = len % sizeof(uint32_t);
+  if (word_align != 0) {
+    len += sizeof(uint32_t) - word_align;
+  }
+
+  // Leave space onto the stack for the strings to be copied, if possible.
+  if (*esp - len <= esp_min) return false;
+  *esp -= len;
+  data->params_dest = (char *) *esp;
+
+  /* Ensure there is extra space for the argv pointers (including the NULL
+     sentinel at the end of the argv array), as well as three values as per
+     80x86 calling convention for calling `int main(int argc, char **argv)`:
+     - the basal pointer to argv,
+     - the value of argc, and
+     - the NULL return address. */
+  int argv_len, calling_conv_len;
+  argv_len = (argc + 1) * sizeof(uint32_t);
+  calling_conv_len = 3 * sizeof(uint32_t);
+
+  if (*esp - argv_len <= esp_min) return false;
+  *esp -= argv_len;
+  data->ptrs_dest = *esp;
+
+  if (*esp - calling_conv_len <= esp_min) return false;
+
+  // At this point we can successfully push all the values onto the stack
+  stack_push(esp, &data->ptrs_dest);
+  stack_push(esp, &argc);
+  void (**return_address) (void) = NULL;
+  stack_push(esp, &return_address);
+  return true;
+}
 
 /**
  * A hash_hash_func for process_status struct.
@@ -120,6 +263,27 @@ void register_user_process(tid_t tid) {
   list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
 }
 
+/**
+ * Copies the first word of file_name, which is the executable name that has a
+ * max length of MAX_FILENAME_LENGTH.
+ * @param file_name A String containing the executable name and arguments.
+ * @param executable_name A buffer of size MAX_FILENAME_LENGTH + 1 to where the
+ * executable name will be copied.
+ */
+static void copy_executable_name(const char *file_name, char *executable_name) {
+  while (*file_name == ' ') file_name++;
+  int len_to_copy = MAX_FILENAME_LENGTH + 1;
+  char *first_delim = strchr(file_name, ' ');
+  // Include the null terminator in the calculation of the length before the
+  // first delimiter, in case the file_name has leading spaces.
+  if (first_delim != NULL) {
+    int len_before_space = first_delim - file_name + 1;
+    if (len_before_space < len_to_copy) len_to_copy = len_before_space;
+  }
+  // Copy the filename, including the null terminator.
+  strlcpy(executable_name, file_name, len_to_copy);
+}
+
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -137,8 +301,11 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  char executable_name[MAX_FILENAME_LENGTH + 1];
+  copy_executable_name(file_name, executable_name);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (executable_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy);
   	return tid;
@@ -195,14 +362,6 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-
-  // TODO: Pass all arguments, not just filename.
-  for (int i = 0; file_name[i] != '\0'; i++) {
-    if (file_name[i] == ' ') {
-      file_name[i] = '\0';
-      break;
-    }
-  }
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -495,10 +654,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  char executable_name[MAX_FILENAME_LENGTH + 1];
+  copy_executable_name(file_name, executable_name);
+
+  file = filesys_open (executable_name);
   if (file == NULL) 
     {
-      printf ("load: %s: open failed\n", file_name);
+      printf ("load: %s: open failed\n", executable_name);
       goto done; 
     }
 
@@ -511,7 +673,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf ("load: %s: error loading executable\n", file_name);
+      printf ("load: %s: error loading executable\n", executable_name);
       goto done; 
     }
 
@@ -577,6 +739,15 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
+
+  struct pass_args_data pass_args_data;
+  // For the first pass, determine if parsing is successful, and if so,
+  // record auxiliary data to be used for the second pass.
+  if (!parse_argument_string(file_name, esp, &pass_args_data))
+    goto done;
+  // On the second pass, use this auxiliary data to copy onto the stack.
+  // If the first parse was successful, the second needs to be as well.
+  ASSERT(parse_argument_string(file_name, NULL, &pass_args_data));
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -724,7 +895,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
