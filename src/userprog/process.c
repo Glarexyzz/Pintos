@@ -102,10 +102,7 @@ static bool parse_argument_string(
   // (1st pass) Find all words in the input string
   while (true) {
     // Skip past whitespace
-    if (*cur == '\0') break;
-    while (*cur != '\0' && *cur == ' ') {
-      cur++;
-    }
+    while (*cur == ' ') cur++;
 
     // Do not include trailing or leading whitespace in our count
     if (*cur == '\0') break;
