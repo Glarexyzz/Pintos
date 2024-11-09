@@ -165,14 +165,15 @@ sema_up (struct semaphore *sema)
 
   intr_set_level (old_level);
 
-  /* When priority scheduling, yield the current thread to the CPU, so that
-     priorities can be updated. Otherwise, in the MFLQ scheduler, yield only
-     if we just woke up a higher-priority thread. */
-  bool should_yield = !thread_mlfqs;
-  should_yield |= will_unblock_thread &&
-    thread_current()->priority < thread_to_wake->priority;
-  should_yield &= intr_get_level() == INTR_ON;
-  if (should_yield) thread_yield();
+  /* Yield only if we just woke up a higher-priority thread,
+     and interrupts are enabled. */
+  if (
+    will_unblock_thread &&
+    thread_current()->priority < thread_to_wake->priority &&
+    intr_get_level() == INTR_ON
+  ) {
+    thread_yield();
+  }
 }
 
 static void sema_test_helper (void *sema_);
