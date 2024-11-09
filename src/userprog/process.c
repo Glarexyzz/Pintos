@@ -376,7 +376,7 @@ start_process (void *file_name_)
     thread_exit ();
 
   // Initialise the file descriptor table.
-  success = hash_init(thread_current()->fd_table, fd_hash, fd_smaller, NULL);
+  success = hash_init(&thread_current()->fd_table, fd_hash, fd_smaller, NULL);
    if (!success)
     thread_exit ();
   thread_current()->fd_counter = 2;
