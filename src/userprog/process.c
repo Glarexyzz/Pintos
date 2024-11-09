@@ -22,7 +22,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-/// The maximum length of a file that can be opened.
+/// The maximum length of the name of a file that can be opened.
 #define MAX_FILENAME_LENGTH 14
 
 struct hash user_processes;
