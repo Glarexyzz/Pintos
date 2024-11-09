@@ -885,9 +885,11 @@ setup_stack (void **esp, const char* file_name)
       if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true))
         goto fail;
       *esp = PHYS_BASE;
+
       struct pass_args_data pass_args_data;
       if (!parse_argument_string(file_name, esp, &pass_args_data))
         goto fail;
+
       bool second_pass;
       second_pass = parse_argument_string(file_name, NULL, &pass_args_data);
       // If the first parse was successful, the second needs to be as well.
