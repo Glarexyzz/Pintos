@@ -1,5 +1,6 @@
 #include "devices/shutdown.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -43,6 +44,7 @@ static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
+static void create(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -51,7 +53,7 @@ const syscall_handler_func syscall_handlers[] = {
   &exit,
   &exec,
   &wait,
-  &syscall_not_implemented,
+  &create,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -201,9 +203,25 @@ static void exec(struct intr_frame *f) {
  * @param f The interrupt stack frame
  */
 static void wait(struct intr_frame *f) {
-  // void wait(pid_t pid)
+  // int wait(pid_t pid)
   int pid = ARG(int, 1);
   f->eax = process_wait(pid);
+}
+
+/**
+ * Handles create system calls.
+ * @param f The interrupt stack frame
+ */
+static void create(struct intr_frame *f) {
+  // bool create(const char *file, unsigned initial_size)
+  const char *file = ARG(const char *, 1);
+  unsigned initial_size = ARG(unsigned , 2);
+
+  lock_acquire(&file_system_lock);
+  bool success = filesys_create(file, initial_size);
+  lock_release(&file_system_lock);
+
+  f->eax = success;
 }
 
 /**
