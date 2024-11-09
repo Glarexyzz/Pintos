@@ -61,29 +61,18 @@ static void stack_push(void **esp, void *data) {
 }
 
 /**
- * Helper function for passing arguments onto the stack.
- * The function is called twice to parse the given filename, delimited by
- * spaces, in two passes.
- * If the arguments cannot fit in one page, then this function returns false.
- * By this method, the arguments will exclude leading and trailing whitespace
- * from the original file_name, and skip consecutive spaces when delimited.
- * On the first pass, dest_stack is taken to be non-NULL, and the function will
- * decrement the stack by the amount needed to store the space for the
- * arguments (including copies of the strings and the NULL return address), and
- * record auxiliary data storing the destination of arguments and delimited
- * strings on the stack to the struct data.
- * On the second pass, dest_stack is taken to be NULL, and the function will
- * make a second pass over the string, reading the values stored in the struct
- * data, and copying the strings onto the stack, as well as their associated
- * basal pointers.
- * @pre When copying onto the stack, the stack must contain enough space to
- * store all the arguments in one page. Otherwise, the stack must initially
- * point to PHYS_BASE.
+ * The functions is called twice to parse the given filename, delimited by
+ * spaces, to put on the stack.
+ * In the first pass, it decrements the stack pointer and pushes char **argv,
+ * argc, and the NULL return address.
+ * In the second pass, it pushes the argv pointers and their corresponding
+ * arguments.
  * @param args_to_split The (unsplit) arguments to be passed onto the stack.
- * @param esp The (possibly NULL) stack pointer, as detailed above. If esp is
- * not NULL, it must point to a valid pointer taken to be the bottom of the
- * stack.
- * @param data The auxiliary data to populate and read between the two passes.
+ * @param esp The (possibly NULL) stack pointer. If esp is not NULL, it must
+ * point to a valid pointer taken to be PHYS_BASE. esp should be null in the
+ * second pass.
+ * @param data The auxiliary data to set in the first pass and populate in the
+ * second.
  * @return `true` if and only if the arguments fit within PGSIZE bytes.
  */
 static bool parse_argument_string(
