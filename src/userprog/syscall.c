@@ -1,5 +1,6 @@
 #include "devices/shutdown.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -43,6 +44,7 @@ static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
+static void open(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -53,7 +55,7 @@ const syscall_handler_func syscall_handlers[] = {
   &wait,
   &syscall_not_implemented,
   &syscall_not_implemented,
-  &syscall_not_implemented,
+  &open,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &write,
@@ -204,6 +206,42 @@ static void wait(struct intr_frame *f) {
   // void wait(pid_t pid)
   int pid = ARG(int, 1);
   f->eax = process_wait(pid);
+}
+
+/**
+ * Handles open system calls.
+ * @param f The interrupt stack frame
+ */
+static void open(struct intr_frame *f) {
+  // int open(const char *file)
+  struct thread *cur_thread = thread_current();
+  const char *user_filename = ARG(const char *, 1);
+  const char *physical_filename = access_user_memory(
+    cur_thread->pagedir,
+    user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+
+  // Initialise the hashmap entry for fd table
+  struct fd_entry *new_fd_entry =
+      malloc(sizeof(struct fd_entry));
+  new_fd_entry->file = filesys_open(physical_filename);
+  new_fd_entry->fd = cur_thread->fd_counter++;
+
+  // Add the entry to the hashmap
+  hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
+
+  lock_release(&file_system_lock);
+
+  f->eax = new_fd_entry->fd;
 }
 
 /**
