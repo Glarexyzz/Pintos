@@ -627,7 +627,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, const char* file_name);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -737,17 +737,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, file_name))
     goto done;
-
-  struct pass_args_data pass_args_data;
-  // For the first pass, determine if parsing is successful, and if so,
-  // record auxiliary data to be used for the second pass.
-  if (!parse_argument_string(file_name, esp, &pass_args_data))
-    goto done;
-  // On the second pass, use this auxiliary data to copy onto the stack.
-  // If the first parse was successful, the second needs to be as well.
-  ASSERT(parse_argument_string(file_name, NULL, &pass_args_data));
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -885,7 +876,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, const char* file_name)
 {
   uint8_t *kpage;
   bool success = false;
@@ -894,11 +885,19 @@ setup_stack (void **esp)
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        palloc_free_page (kpage);
+      if (!success) goto fail;
+      *esp = PHYS_BASE;
+      struct pass_args_data pass_args_data;
+      success = parse_argument_string(file_name, esp, &pass_args_data);
+      if (!success) goto fail;
+      success = parse_argument_string(file_name, NULL, &pass_args_data);
+      // If the first parse was successful, the second needs to be as well.
+      ASSERT(success);
     }
+  return success;
+
+ fail:
+  palloc_free_page(kpage);
   return success;
 }
 
