@@ -886,10 +886,12 @@ setup_stack (void **esp, const char* file_name)
         goto fail;
       *esp = PHYS_BASE;
 
+      // Decrement the stack pointer.
       struct pass_args_data pass_args_data;
       if (!parse_argument_string(file_name, esp, &pass_args_data))
         goto fail;
 
+      // Populate the stack.
       bool second_pass;
       second_pass = parse_argument_string(file_name, NULL, &pass_args_data);
       // If the first parse was successful, the second needs to be as well.
