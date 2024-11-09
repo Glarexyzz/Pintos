@@ -129,8 +129,7 @@ static void exit_process(int status) {
 
   // Close all the files and free all the file descriptors,
   // and the file descriptor table
-  struct hash *fd_table = cur_thread->fd_table;
-  hash_destroy(fd_table, &close_file);
+  hash_destroy(&cur_thread->fd_table, &close_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
