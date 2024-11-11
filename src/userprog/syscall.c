@@ -47,6 +47,7 @@ static void wait(struct intr_frame *f);
 static void create(struct intr_frame *f);
 static void remove_handler(struct intr_frame *f);
 static void open(struct intr_frame *f);
+static void filesize(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -58,7 +59,7 @@ const syscall_handler_func syscall_handlers[] = {
   &create,
   &remove_handler,
   &open,
-  &syscall_not_implemented,
+  &filesize,
   &syscall_not_implemented,
   &write,
   &syscall_not_implemented,
@@ -309,6 +310,34 @@ static void open(struct intr_frame *f) {
   hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
 
   f->eax = new_fd_entry->fd;
+}
+
+/**
+ * Handles filesize system calls.
+ * @param f The interrupt stack frame
+ */
+static void filesize(struct intr_frame *f) {
+  // int filesize(int fd)
+  int fd = ARG(int, 1);
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  // Search up the fd-file mapping from the fd table.
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+  lock_acquire(&file_system_lock);
+  int size = file_length(fd_found->file);
+  lock_release(&file_system_lock);
+
+  f->eax = size;
 }
 
 /**
