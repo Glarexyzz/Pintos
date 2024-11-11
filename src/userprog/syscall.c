@@ -213,8 +213,19 @@ static void wait(struct intr_frame *f) {
 static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
   int fd = ARG(int, 1);
-  const void *buffer = ARG(const void *, 2);
+  const void *user_buffer = ARG(const void *, 2);
   unsigned size = ARG(unsigned, 3);
+
+  const char *buffer = access_user_memory(
+    cur_thread->pagedir,
+    user_buffer
+  );
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (buffer == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
 
   if (fd == 1) {
     // Console write
