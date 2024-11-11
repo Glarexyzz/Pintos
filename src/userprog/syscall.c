@@ -218,20 +218,20 @@ static void create(struct intr_frame *f) {
   unsigned initial_size = ARG(unsigned , 2);
 
   //Access memory
-  const char *physical_file_address = access_user_memory(
+  const char *physical_filename = access_user_memory(
       thread_current()->pagedir,
       user_filename
   );
 
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
-  if (physical_file_address == NULL) {
+  if (physical_filename == NULL) {
     exit_process(-1);
     NOT_REACHED();
   }
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_create(physical_file_address, initial_size);
+  bool success = filesys_create(physical_filename, initial_size);
   lock_release(&file_system_lock);
 
   f->eax = success;
