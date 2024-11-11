@@ -348,8 +348,19 @@ static void filesize(struct intr_frame *f) {
 static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
   int fd = ARG(int, 1);
-  const void *buffer = ARG(const void *, 2);
+  const void *user_buffer = ARG(const void *, 2);
   unsigned size = ARG(unsigned, 3);
+
+  const char *buffer = access_user_memory(
+    thread_current()->pagedir,
+    user_buffer
+  );
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (buffer == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
 
   if (fd == 1) {
     // Console write
@@ -370,6 +381,28 @@ static void write(struct intr_frame *f) {
 
     // Assume all bytes have been written
     f->eax = size;
+  }
+  else {
+    // Write to file
+
+    // Search up the fd-file mapping from the fd table.
+  	struct fd_entry fd_to_find;
+  	fd_to_find.fd = fd;
+  	struct hash_elem *fd_found_elem = hash_find(
+  	  &thread_current()->fd_table,
+  	  &fd_to_find.elem
+  	);
+  	if (fd_found_elem == NULL) {
+  	  exit_process(-1);
+  	  NOT_REACHED();
+  	}
+  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+    lock_acquire(&file_system_lock);
+    int bytes_written = file_write(fd_found->file, buffer, size);
+    lock_release(&file_system_lock);
+
+    f->eax = bytes_written;
   }
 }
 
