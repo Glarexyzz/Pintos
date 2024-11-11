@@ -45,6 +45,7 @@ static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
 static void create(struct intr_frame *f);
+static void remove_handler(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -54,7 +55,7 @@ const syscall_handler_func syscall_handlers[] = {
   &exec,
   &wait,
   &create,
-  &syscall_not_implemented,
+  &remove_handler,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -231,6 +232,34 @@ static void create(struct intr_frame *f) {
 
   lock_acquire(&file_system_lock);
   bool success = filesys_create(physical_filename, initial_size);
+  lock_release(&file_system_lock);
+
+  f->eax = success;
+}
+
+/**
+ * Handles remove system calls.
+ * @param f The interrupt stack frame
+ */
+static void remove_handler(struct intr_frame *f) {
+  // bool remove(const char *file)
+  const char *user_filename = ARG(const char *, 1);
+
+  //Access memory
+  const char *physical_filename = access_user_memory(
+      thread_current()->pagedir,
+      user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  bool success = filesys_remove(physical_filename);
   lock_release(&file_system_lock);
 
   f->eax = success;
