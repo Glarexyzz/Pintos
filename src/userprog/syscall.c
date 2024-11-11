@@ -228,18 +228,27 @@ static void open(struct intr_frame *f) {
     NOT_REACHED();
   }
 
-  lock_acquire(&file_system_lock);
-
   // Initialise the hashmap entry for fd table
   struct fd_entry *new_fd_entry =
       malloc(sizeof(struct fd_entry));
-  new_fd_entry->file = filesys_open(physical_filename);
+  if (new_fd_entry == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  struct file *new_file = filesys_open(physical_filename);
+  lock_release(&file_system_lock);
+
+  if (new_file == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+  new_fd_entry->file = new_file;
   new_fd_entry->fd = cur_thread->fd_counter++;
 
   // Add the entry to the hashmap
   hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
-
-  lock_release(&file_system_lock);
 
   f->eax = new_fd_entry->fd;
 }
