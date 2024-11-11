@@ -39,19 +39,17 @@ static void lock_update_lower_max_priority (struct lock *lock);
 /**
  * Removes an element from a list of waiting threads.
  * Panics if the list is empty.
+ * This function must be called with interrupts disabled.
  * @param thread_list the list to pop from
  * @return the thread with the maximum priority.
- * @remark In the priority scheduler, this list need not be sorted, and as such
- * the operation takes O(n) time in the number of threads. In the MLFQ
- * scheduler, the first element in the list is removed, which takes O(1) time.
  */
 static struct thread *
 waiter_list_pop (struct list *thread_list)
 {
+  ASSERT (intr_get_level () == INTR_OFF);
   ASSERT (!list_empty (thread_list));
   struct list_elem *max_priority_elem;
-  max_priority_elem = thread_mlfqs ? list_front (thread_list)
-    : list_max (thread_list, thread_lower_priority, NULL);
+  max_priority_elem = list_max (thread_list, thread_lower_priority, NULL);
   list_remove (max_priority_elem);
   return list_entry (max_priority_elem, struct thread, elem);
 }
@@ -167,17 +165,12 @@ sema_up (struct semaphore *sema)
 
   intr_set_level (old_level);
 
-  if (old_level == INTR_OFF) return;
-
-  /* When priority scheduling, yield the current thread to the CPU, so that
-     priorities can be updated. Otherwise, in the MFLQ scheduler, yield only
-     if we just woke up a higher-priority thread. */
+  /* Yield only if we just woke up a higher-priority thread,
+     and interrupts are enabled. */
   if (
-    !thread_mlfqs ||
-    (
-      will_unblock_thread &&
-      thread_current()->priority < thread_to_wake->priority
-    )
+    will_unblock_thread &&
+    thread_current()->priority < thread_to_wake->priority &&
+    intr_get_level() == INTR_ON
   ) {
     thread_yield();
   }
@@ -353,9 +346,12 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
+  enum intr_level old_level = intr_disable();
   if (!thread_mlfqs)
     list_remove (&lock->elem);
   lock->holder = NULL;
+  intr_set_level(old_level);
+
   sema_up (&lock->semaphore);
 }
 
