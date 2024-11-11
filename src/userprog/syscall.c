@@ -217,7 +217,7 @@ static void write(struct intr_frame *f) {
   unsigned size = ARG(unsigned, 3);
 
   const char *buffer = access_user_memory(
-    cur_thread->pagedir,
+    thread_current()->pagedir,
     user_buffer
   );
   // Terminating the offending process and freeing its resources
