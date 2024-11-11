@@ -46,6 +46,7 @@ static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
 static void create(struct intr_frame *f);
 static void remove_handler(struct intr_frame *f);
+static void open(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
@@ -56,7 +57,7 @@ const syscall_handler_func syscall_handlers[] = {
   &wait,
   &create,
   &remove_handler,
-  &syscall_not_implemented,
+  &open,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &write,
@@ -263,6 +264,51 @@ static void remove_handler(struct intr_frame *f) {
   lock_release(&file_system_lock);
 
   f->eax = success;
+}
+
+/**
+ * Handles open system calls.
+ * @param f The interrupt stack frame
+ */
+static void open(struct intr_frame *f) {
+  // int open(const char *file)
+  struct thread *cur_thread = thread_current();
+  const char *user_filename = ARG(const char *, 1);
+  const char *physical_filename = access_user_memory(
+    cur_thread->pagedir,
+    user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  // Initialise the hashmap entry for fd table
+  struct fd_entry *new_fd_entry =
+      malloc(sizeof(struct fd_entry));
+  if (new_fd_entry == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  struct file *new_file = filesys_open(physical_filename);
+  lock_release(&file_system_lock);
+
+  if (new_file == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+  new_fd_entry->file = new_file;
+  new_fd_entry->fd = cur_thread->fd_counter++;
+
+  // Add the entry to the hashmap
+  hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
+
+  f->eax = new_fd_entry->fd;
 }
 
 /**
