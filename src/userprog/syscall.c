@@ -224,6 +224,7 @@ static void filesize(struct intr_frame *f) {
   );
   if (fd_found_elem == NULL) {
     exit_process(-1);
+    NOT_REACHED();
   }
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
