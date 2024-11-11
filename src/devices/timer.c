@@ -233,13 +233,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
     )->wake_time <= timer_ticks()
   ) {
     // Wake the thread
-    thread_unblock(
-      list_entry(
-        list_pop_front(&sleeping_list),
-        struct sleeping_thread,
-        elem
-      )->thread
-    );
+    struct thread *thread_to_wake = list_entry(
+      list_pop_front(&sleeping_list),
+      struct sleeping_thread,
+      elem
+    )->thread;
+
+    thread_unblock(thread_to_wake);
+    if (thread_current()->priority < thread_to_wake->priority) {
+      intr_yield_on_return();
+    }
   }
 
   thread_tick ();
