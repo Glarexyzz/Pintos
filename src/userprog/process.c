@@ -229,12 +229,13 @@ static bool user_process_tid_smaller(
  * Initialises the user_processes hashmap.
  */
 void user_process_hashmap_init() {
-  hash_init(
+  bool success = hash_init(
     &user_processes,
     &user_process_hash,
     &user_process_tid_smaller,
     NULL
   );
+  ASSERT(success);
   lock_init(&user_processes_lock);
 }
 
