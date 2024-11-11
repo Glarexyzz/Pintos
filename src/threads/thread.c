@@ -628,10 +628,11 @@ thread_set_priority (int new_priority)
 
   intr_set_level (old_level);
 
-  if (old_level == INTR_OFF) return;
-
-  if (current_thread->priority < ready_highest_priority)
-    thread_yield ();
+  if (
+    intr_get_level() == INTR_ON &&
+    current_thread->priority < ready_highest_priority &&
+  )
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
