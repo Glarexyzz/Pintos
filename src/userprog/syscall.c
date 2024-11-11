@@ -236,6 +236,28 @@ static void write(struct intr_frame *f) {
     // Assume all bytes have been written
     f->eax = size;
   }
+  else {
+    // Write to file
+
+    // Search up the fd-file mapping from the fd table.
+  	struct fd_entry fd_to_find;
+  	fd_to_find.fd = fd;
+  	struct hash_elem *fd_found_elem = hash_find(
+  	  &thread_current()->fd_table,
+  	  &fd_to_find
+  	);
+  	if (fd_found_elem == NULL) {
+  	  exit_process(-1);
+  	  NOT_REACHED()
+  	}
+  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+    lock_acquire(&file_system_lock);
+    int bytes_written = file_write(fd_found->file, buffer, size);
+    lock_release(&file_system_lock);
+
+    f->eax = bytes_written;
+  }
 }
 
 /**
