@@ -251,12 +251,12 @@ static void close(struct intr_frame *f UNUSED) {
   struct fd_entry fd_to_find;
   fd_to_find.fd = fd;
   struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find
+    thread_current()->fd_table,
+    &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
     exit_process(-1);
-    NOT_REACHED()
+    NOT_REACHED();
   }
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
