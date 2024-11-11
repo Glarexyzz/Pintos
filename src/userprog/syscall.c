@@ -219,8 +219,8 @@ static void filesize(struct intr_frame *f) {
 
   // Search up the fd-file mapping from the fd table.
   struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find
+    thread_current()->fd_table,
+    &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
     exit_process(-1);
