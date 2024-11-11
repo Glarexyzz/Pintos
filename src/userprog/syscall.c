@@ -207,6 +207,51 @@ static void wait(struct intr_frame *f) {
 }
 
 /**
+ * Handles read system calls.
+ * @param f The interrupt stack frame
+ */
+static void read(struct intr_frame *f) {
+  // int read(int fd, void *buffer, unsigned size)
+  int fd = ARG(int, 1);
+  void *user_buffer = ARG(void *, 2);
+  unsigned size = ARG(unsigned, 3);
+
+  void *buffer = access_user_memory(
+    thread_current()->pagedir,
+    user_buffer
+  );
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (buffer == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  if (fd == 0) {
+
+  } else {
+    // Read from file
+
+    // Search up the fd-file mapping from the fd table.
+  	struct fd_entry fd_to_find;
+  	fd_to_find.fd = fd;
+  	struct hash_elem *fd_found_elem = hash_find(
+  	  thread_current()->fd_table,
+  	  &fd_to_find.elem
+  	);
+  	if (fd_found_elem == NULL) {
+  	  exit_process(-1);
+  	  NOT_REACHED();
+  	}
+  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+    lock_acquire(&file_system_lock);
+    int bytes_read = file_read(fd_found->file, buffer, size);
+    lock_release(&file_system_lock);
+  }
+}
+
+/**
  * Handles write system calls.
  * @param f The interrupt stack frame
  */
