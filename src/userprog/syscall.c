@@ -44,6 +44,7 @@ static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
+static void create(struct intr_frame *f);
 static void remove_handler(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
@@ -53,7 +54,7 @@ const syscall_handler_func syscall_handlers[] = {
   &exit,
   &exec,
   &wait,
-  &syscall_not_implemented,
+  &create,
   &remove_handler,
   &syscall_not_implemented,
   &syscall_not_implemented,
@@ -131,8 +132,7 @@ static void exit_process(int status) {
 
   // Close all the files and free all the file descriptors,
   // and the file descriptor table
-  struct hash *fd_table = cur_thread->fd_table;
-  hash_destroy(fd_table, &close_file);
+  hash_destroy(&cur_thread->fd_table, &close_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
@@ -203,9 +203,38 @@ static void exec(struct intr_frame *f) {
  * @param f The interrupt stack frame
  */
 static void wait(struct intr_frame *f) {
-  // void wait(pid_t pid)
+  // int wait(pid_t pid)
   int pid = ARG(int, 1);
   f->eax = process_wait(pid);
+}
+
+/**
+ * Handles create system calls.
+ * @param f The interrupt stack frame
+ */
+static void create(struct intr_frame *f) {
+  // bool create(const char *file, unsigned initial_size)
+  const char *user_filename = ARG(const char *, 1);
+  unsigned initial_size = ARG(unsigned , 2);
+
+  //Access memory
+  const char *physical_filename = access_user_memory(
+      thread_current()->pagedir,
+      user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  bool success = filesys_create(physical_filename, initial_size);
+  lock_release(&file_system_lock);
+
+  f->eax = success;
 }
 
 /**

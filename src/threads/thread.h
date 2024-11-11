@@ -108,7 +108,7 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list child_tids;             /* Children processes. */
-    struct hash *fd_table;              /* File descriptor table. */
+    struct hash fd_table;               /* File descriptor table. */
     int fd_counter;                     /* Counter for allocating file descriptor number. */
 #endif
 

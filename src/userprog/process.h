@@ -5,7 +5,6 @@
 #include "threads/thread.h"
 #include <hash.h>
 
-
 struct process_status {
   tid_t tid;
   struct semaphore sema;
