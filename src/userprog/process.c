@@ -892,8 +892,8 @@ setup_stack (void **esp, const char* file_name)
         goto fail;
 
       // Populate the stack.
-      bool second_pass;
-      second_pass = parse_argument_string(file_name, NULL, &pass_args_data);
+      bool second_pass =
+        parse_argument_string(file_name, NULL, &pass_args_data);
       // If the first parse was successful, the second needs to be as well.
       ASSERT(second_pass);
     }
