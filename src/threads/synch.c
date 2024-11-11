@@ -350,9 +350,9 @@ lock_release (struct lock *lock)
   if (!thread_mlfqs)
     list_remove (&lock->elem);
   lock->holder = NULL;
-  intr_set_level(old_level);
 
   sema_up (&lock->semaphore);
+  intr_set_level(old_level);
 }
 
 static void
