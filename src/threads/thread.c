@@ -630,7 +630,7 @@ thread_set_priority (int new_priority)
 
   if (
     intr_get_level() == INTR_ON &&
-    current_thread->priority < ready_highest_priority &&
+    current_thread->priority < ready_highest_priority
   )
     thread_yield();
 }
