@@ -255,7 +255,7 @@ static void write(struct intr_frame *f) {
   	fd_to_find.fd = fd;
   	struct hash_elem *fd_found_elem = hash_find(
   	  &thread_current()->fd_table,
-  	  &fd_to_find
+  	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
   	  exit_process(-1);
