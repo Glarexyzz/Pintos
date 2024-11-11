@@ -49,6 +49,7 @@ static void remove_handler(struct intr_frame *f);
 static void open(struct intr_frame *f);
 static void filesize(struct intr_frame *f);
 static void write(struct intr_frame *f);
+static void tell(struct intr_frame *f);
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
@@ -63,7 +64,7 @@ const syscall_handler_func syscall_handlers[] = {
   &syscall_not_implemented,
   &write,
   &syscall_not_implemented,
-  &syscall_not_implemented,
+  &tell,
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented
@@ -370,6 +371,34 @@ static void write(struct intr_frame *f) {
     // Assume all bytes have been written
     f->eax = size;
   }
+}
+
+/**
+ * Handles tell system calls.
+ * @param f The interrupt stack frame
+ */
+static void tell(struct intr_frame *f) {
+  // unsigned tell(int fd)
+  int fd = ARG(int, 1);
+
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+  lock_acquire(&file_system_lock);
+  unsigned position = file_tell(fd_found->file);
+  lock_release(&file_system_lock);
+
+  f->eax = position;
 }
 
 /**
