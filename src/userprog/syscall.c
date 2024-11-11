@@ -214,10 +214,23 @@ static void wait(struct intr_frame *f) {
  */
 static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
-  const char *file = ARG(const char *, 1);
+  const char *user_filename = ARG(const char *, 1);
+
+  //Access memory
+  const char *physical_filename = access_user_memory(
+      thread_current()->pagedir,
+      user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_remove(file);
+  bool success = filesys_remove(physical_filename);
   lock_release(&file_system_lock);
 
   f->eax = success;
