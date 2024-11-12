@@ -96,7 +96,7 @@ const syscall_handler_func syscall_handlers[] = {
   &syscall_not_implemented,
   &syscall_not_implemented,
   &syscall_not_implemented,
-  &syscall_not_implemented,
+  &read,
   &write,
   &syscall_not_implemented,
   &syscall_not_implemented,
