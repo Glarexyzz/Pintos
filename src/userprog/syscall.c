@@ -286,16 +286,16 @@ static void open(struct intr_frame *f) {
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (physical_filename == NULL) {
-    exit_process(-1);
-    NOT_REACHED();
+    f->eax = -1;
+    return;
   }
 
   // Initialise the hashmap entry for fd table
   struct fd_entry *new_fd_entry =
       malloc(sizeof(struct fd_entry));
   if (new_fd_entry == NULL) {
-    exit_process(-1);
-    NOT_REACHED();
+    f->eax = -1;
+    return;
   }
 
   lock_acquire(&file_system_lock);
@@ -303,8 +303,8 @@ static void open(struct intr_frame *f) {
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
-    exit_process(-1);
-    NOT_REACHED();
+    f->eax = -1;
+    return;
   }
   new_fd_entry->file = new_file;
   new_fd_entry->fd = cur_thread->fd_counter++;
