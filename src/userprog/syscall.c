@@ -306,14 +306,6 @@ static void open(struct intr_frame *f) {
     return;
   }
 
-  // Initialise the hashmap entry for fd table
-  struct fd_entry *new_fd_entry =
-      malloc(sizeof(struct fd_entry));
-  if (new_fd_entry == NULL) {
-    f->eax = -1;
-    return;
-  }
-
   lock_acquire(&file_system_lock);
   struct file *new_file = filesys_open(physical_filename);
   lock_release(&file_system_lock);
@@ -322,10 +314,19 @@ static void open(struct intr_frame *f) {
     f->eax = -1;
     return;
   }
+
+  // Initialise the hashmap entry for fd table
+  struct fd_entry *new_fd_entry =
+    malloc(sizeof(struct fd_entry));
+  if (new_fd_entry == NULL) {
+    f->eax = -1;
+    return;
+  }
+
   new_fd_entry->file = new_file;
   new_fd_entry->fd = cur_thread->fd_counter++;
 
-  // Add the entry to the hashmap
+  // Add the entry to the FD table
   hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
 
   f->eax = new_fd_entry->fd;
