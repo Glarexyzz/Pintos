@@ -70,6 +70,21 @@ static void *access_user_memory(uint32_t *pd, const void *uaddr);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
+// Helper functions for reading to and writing from buffer pages.
+
+/**
+ * Prints a given page of the buffer to the console.
+ * The function does not provide synchronisation for console writes on its own.
+ * @param buffer_page_ The physical address of the portion of the buffer.
+ * @param page_size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void buffer_page_print(
+  void *buffer_page_,
+  unsigned buffer_page_size,
+  void *state UNUSED
+);
+
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
@@ -375,6 +390,26 @@ static void read(struct intr_frame *f) {
   f->eax = bytes_read;
 }
 
+static void buffer_page_print(
+  void *buffer_page_,
+  unsigned buffer_page_size,
+  void *state UNUSED
+) {
+  unsigned bytes_written;
+  const void *buffer_page = (const void *)buffer_page_;
+  // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
+  // this part of the buffer occupies in memory
+  for (
+    bytes_written = 0;
+    bytes_written + MAX_WRITE_SIZE < buffer_page_size;
+    bytes_written += MAX_WRITE_SIZE
+  ) {
+    putbuf(buffer_page + bytes_written, MAX_WRITE_SIZE);
+  }
+  // Write the remaining bytes in the page
+  putbuf(buffer_page + bytes_written, buffer_page_size - bytes_written);
+}
+
 /**
  * Handles write system calls.
  * @param f The interrupt stack frame
@@ -385,28 +420,21 @@ static void write(struct intr_frame *f) {
   const void *buffer = ARG(const void *, 2);
   unsigned size = ARG(unsigned, 3);
 
+  // If we don't own the buffer's memory, the operation is invalid.
+  if (!user_owns_memory_range(buffer, size)) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
   if (fd == 1) {
     // Console write
 
-    unsigned bytes_written;
-
     lock_acquire(&console_lock);
-
-    // Keep writing MAX_WRITE_SIZE bytes as long as it's less than size
-    for (
-      bytes_written = 0;
-      bytes_written + MAX_WRITE_SIZE < size;
-      bytes_written += MAX_WRITE_SIZE
-    ) {
-      putbuf(buffer + bytes_written, MAX_WRITE_SIZE);
-    }
-
-    // Write the remaining bytes
-    putbuf(buffer + bytes_written, size - bytes_written);
-
+    buffer_pages_foreach((void *)buffer, size, &buffer_page_print, NULL);
     lock_release(&console_lock);
 
-    // Assume all bytes have been written
+    // Given the original memory is valid, putbuf will succeed
+    // so all bytes will have been written.
     f->eax = size;
   }
 }
