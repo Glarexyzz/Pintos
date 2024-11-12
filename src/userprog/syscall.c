@@ -200,7 +200,19 @@ static void exit(struct intr_frame *f UNUSED) {
 static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   char *cmd_line = ARG(char *, 1);
-  f->eax = process_execute(cmd_line);
+
+  char *physical_cmd_line = access_user_memory(
+    thread_current()->pagedir,
+    cmd_line
+  );
+
+  // Terminate process if pointer is invalid.
+  if (physical_cmd_line == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  f->eax = process_execute(physical_cmd_line);
 }
 
 /**

@@ -487,6 +487,10 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
 
+  // Close the executable file pointer, allowing writes again.
+  ASSERT(cur->executable_file != NULL);
+  file_close(cur->executable_file);
+
   // When a process exits, we must delete all its child processes from the
   // user_processes hashmap, since no processes can wait for them anymore
 
@@ -658,12 +662,23 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char executable_name[MAX_FILENAME_LENGTH + 1];
   copy_executable_name(file_name, executable_name);
 
+  lock_acquire(&file_system_lock);
   file = filesys_open (executable_name);
+  lock_release(&file_system_lock);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", executable_name);
       goto done; 
     }
+
+  // Store file pointer in thread.
+  t->executable_file = file;
+
+  // Make the file unwritable.
+  lock_acquire(&file_system_lock);
+  file_deny_write(file);
+  lock_release(&file_system_lock);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -748,7 +763,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
