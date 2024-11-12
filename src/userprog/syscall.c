@@ -37,6 +37,7 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
 void close_file(struct hash_elem *element, void *aux UNUSED);
 static void exit_process(int status) NO_RETURN;
 static void *access_user_memory(uint32_t *pd, const void *uaddr);
+static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
@@ -212,6 +213,30 @@ static void wait(struct intr_frame *f) {
   // void wait(pid_t pid)
   int pid = ARG(int, 1);
   f->eax = process_wait(pid);
+}
+
+/**
+ * Checks whether the user owns a given block of memory of a given size, that
+ * starts at a given (virtual) address.
+ * @param buffer The virtual address to the buffer.
+ * @param size The length of the buffer that would be read from
+ * or written to.
+ * @return `true` if and only if all parts of the buffer are owned by the user.
+ */
+static bool user_owns_memory_range(const void *buffer, unsigned size) {
+  uint32_t *pd = thread_current()->pagedir;
+  // Performing pointer arithmetic on a void* is undefined behaviour,
+  // so cast to a uint8_t* to comply with the standard.
+  for (unsigned i = 0; i < size; i += PGSIZE) {
+    if (access_user_memory(pd, &((uint8_t *)buffer)[i]) == NULL) {
+      return false;
+    }
+  }
+  // Check the end of the buffer as well.
+  if (access_user_memory(pd, &((uint8_t *)buffer)[size - 1]) == NULL) {
+    return false;
+  }
+  return true;
 }
 
 /**
