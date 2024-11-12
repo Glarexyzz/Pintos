@@ -67,6 +67,11 @@ static void buffer_page_record_stdin(
   unsigned buffer_page_size,
   void *state UNUSED
 );
+static void buffer_page_file_read(
+  void *buffer_page,
+  unsigned buffer_page_size,
+  void *state_
+);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
@@ -347,6 +352,41 @@ static void buffer_page_record_stdin(
   }
 }
 
+/// State struct to be used by the buffer page iterator, storing the file being
+/// read, the total number of bytes read, and whether EOF has been reached.
+struct file_read_state {
+  struct file *file;
+  unsigned bytes_read;
+  bool eof_reached;
+};
+
+/**
+ * Helper function for reading from a file, and writing it to the given page
+ * of the buffer. Will do nothing once an EOF has been reached.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for file reads on its own.
+ * @param buffer_page
+ * @param buffer_page_size
+ * @param state_ A pointer to a `struct file_read_state`
+ * @see struct file_read_state
+ */
+static void buffer_page_file_read(
+  void *buffer_page,
+  unsigned buffer_page_size,
+  void *state_
+) {
+  struct file_read_state *state = (struct file_read_state *)state_;
+  if (state->eof_reached) return;
+  unsigned bytes_read = file_read(state->file, buffer_page, buffer_page_size);
+  if (bytes_read < buffer_page_size) {
+    // The buffer has not been fully written to, indicating we are at the
+    // end of the file.
+    state->eof_reached = true;
+  } else {
+    state->bytes_read += bytes_read;
+  }
+}
+
 /**
  * Handles read system calls.
  * @param f The interrupt stack frame
@@ -359,17 +399,6 @@ static void read(struct intr_frame *f) {
 
   int bytes_read;
 
-  void *buffer = access_user_memory(
-    thread_current()->pagedir,
-    user_buffer
-  );
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (!user_owns_memory_range(user_buffer, size)) {
-    exit_process(-1);
-    NOT_REACHED();
-  }
-
   if (fd == 0) {
     // Read from the console.
     lock_acquire(&console_lock);
@@ -379,11 +408,12 @@ static void read(struct intr_frame *f) {
     // from stdin.
     bytes_read = size;
   } else {
-    // Read from file
+    // Read from file.
 
     // Search up the fd-file mapping from the fd table.
   	struct fd_entry fd_to_find;
   	fd_to_find.fd = fd;
+
   	struct hash_elem *fd_found_elem = hash_find(
   	  thread_current()->fd_table,
   	  &fd_to_find.elem
@@ -394,9 +424,17 @@ static void read(struct intr_frame *f) {
   	}
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
+    // Initialise the current state of reading the file to the buffer.
+    struct file_read_state state;
+    state.file = fd_found->file;
+    state.eof_reached = false;
+    state.bytes_read = 0;
+
     lock_acquire(&file_system_lock);
-    bytes_read = file_read(fd_found->file, buffer, size);
+    buffer_pages_foreach(user_buffer, size, &buffer_page_file_read, &state);
     lock_release(&file_system_lock);
+
+    bytes_read = state.bytes_read;
   }
   f->eax = bytes_read;
 }
