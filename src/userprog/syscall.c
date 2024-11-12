@@ -42,21 +42,6 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
  */
 typedef void (*block_foreach_func) (void *, unsigned, void *);
 
-/**
- * Iterates over all pages to read mapped by the buffer of given size,
- * applying the foreach function to each page with the size of the section of
- * buffer in that page, and the state.
- * The function panics if the buffer does not map to a block of memory owned
- * by the user, so this must be checked beforehand.
- * Care must be taken to ensure that the foreach function does not attempt to
- * write to read-only data, if the provided `user_buffer` is also read-only.
- * @pre `user_buffer` is owned completely by the user (checked by
- * `user_owns_memory_range`).
- * @param user_buffer The virtual (user) address to the buffer.
- * @param size The size of the buffer provided by the user.
- * @param f Iterator function to handle a part of the buffer in one page.
- * @param state State for the helper function to use.
- */
 static void buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
@@ -72,27 +57,11 @@ static void syscall_handler (struct intr_frame *);
 
 // Helper functions for reading to and writing from buffer pages.
 
-/**
- * Prints a given page of the buffer to the console.
- * The function does not provide synchronisation for console writes on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
 static void buffer_page_print(
   void *buffer_page_,
   unsigned buffer_page_size,
   void *state UNUSED
 );
-
-/**
- * Reads input from the console, writing it to the given page of the buffer.
- * The original buffer should not point to a read-only section of memory.
- * The function does not provide synchronisation for console reads on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
 static void buffer_page_record_stdin(
   void *buffer_page_,
   unsigned buffer_page_size,
@@ -298,6 +267,21 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
   return true;
 }
 
+/**
+ * Iterates over all pages to read mapped by the buffer of given size,
+ * applying the foreach function to each page with the size of the section of
+ * buffer in that page, and the state.
+ * The function panics if the buffer does not map to a block of memory owned
+ * by the user, so this must be checked beforehand.
+ * Care must be taken to ensure that the foreach function does not attempt to
+ * write to read-only data, if the provided `user_buffer` is also read-only.
+ * @pre `user_buffer` is owned completely by the user (checked by
+ * `user_owns_memory_range`).
+ * @param user_buffer The virtual (user) address to the buffer.
+ * @param size The size of the buffer provided by the user.
+ * @param f Iterator function to handle a part of the buffer in one page.
+ * @param state State for the helper function to use.
+ */
 static void buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
@@ -348,6 +332,14 @@ static void buffer_pages_foreach(
   }
 }
 
+/**
+ * Reads input from the console, writing it to the given page of the buffer.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for console reads on its own.
+ * @param buffer_page_ The physical address of the portion of the buffer.
+ * @param page_size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
 static void buffer_page_record_stdin(
   void *buffer_page_,
   unsigned buffer_page_size,
@@ -413,6 +405,13 @@ static void read(struct intr_frame *f) {
   f->eax = bytes_read;
 }
 
+/**
+ * Prints a given page of the buffer to the console.
+ * The function does not provide synchronisation for console writes on its own.
+ * @param buffer_page_ The physical address of the portion of the buffer.
+ * @param page_size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
 static void buffer_page_print(
   void *buffer_page_,
   unsigned buffer_page_size,
