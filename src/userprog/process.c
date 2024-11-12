@@ -666,14 +666,14 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file = filesys_open (executable_name);
   lock_release(&file_system_lock);
 
-  if (file == NULL) 
+  // Store file pointer in thread.
+  t->executable_file = file;
+
+  if (file == NULL)
     {
       printf ("load: %s: open failed\n", executable_name);
       goto done; 
     }
-
-  // Store file pointer in thread.
-  t->executable_file = file;
 
   // Make the file unwritable.
   lock_acquire(&file_system_lock);
