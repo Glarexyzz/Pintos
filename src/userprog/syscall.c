@@ -16,20 +16,91 @@
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
 
+// Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
+#define AN_ARG(t1, n1, number)                               \
+  void *arg ## number ## _ = ((uint32_t *) f->esp)+number;   \
+  void *arg ## number ## _kernel_ = access_user_memory(      \
+    thread_current()->pagedir,                               \
+    arg ## number ## _                                       \
+  );                                                         \
+  if (arg ## number ## _kernel_ == NULL) {                   \
+    exit_process(-1);                                        \
+    NOT_REACHED();                                           \
+  }                                                          \
+  t1 n1 = *((t1 *) arg ## number ## _kernel_);
+
 /**
- * Get the argument of type `type` and index `arg_no` from an `intr_frame`
- * @param type The type of the argument
- * @param arg_no The 1-indexed index of the argument
- * @pre The `intr_frame` is called `f` and is in scope
- * @example \code
- * void example(struct intr_frame *f) {
- *   // example(int x, char y)
- *   int x = ARG(int, 1);
- *   char y = ARG(int, 2);
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the argument.
+ * @param n1 The name of the argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg)
+ *   ONE_ARG(const char *, string_arg);
+ *
+ *   // do stuff
  * }
  * \endcode
  */
-#define ARG(type, arg_no) (*((type *) (((uint32_t *) f->esp)+(arg_no))))
+#define ONE_ARG(t1, n1) \
+  AN_ARG(t1, n1, 1)
+
+/**
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the first argument.
+ * @param n1 The name of the first argument.
+ * @param t2 The type of the second argument.
+ * @param n2 The name of the second argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg, int size)
+ *   TWO_ARG(
+ *     const char *, string_arg,
+ *     int, size
+ *   );
+ *
+ *   // do stuff
+ * }
+ * \endcode
+ */
+#define TWO_ARG(t1, n1, t2, n2) \
+  AN_ARG(t1, n1, 1)             \
+  AN_ARG(t2, n2, 2)
+
+/**
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the first argument.
+ * @param n1 The name of the first argument.
+ * @param t2 The type of the second argument.
+ * @param n2 The name of the second argument.
+ * @param t3 The type of the third argument.
+ * @param n3 The name of the third argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg, int size, unsigned max)
+ *   THREE_ARG(
+ *     const char *, string_arg,
+ *     int, size,
+ *     unsigned, max
+ *   );
+ *
+ *   // do stuff
+ * }
+ * \endcode
+ */
+#define THREE_ARG(t1, n1, t2, n2, t3, n3) \
+  AN_ARG(t1, n1, 1)                       \
+  AN_ARG(t2, n2, 2)                       \
+  AN_ARG(t3, n3, 3)
 
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
@@ -189,7 +260,7 @@ static void halt(struct intr_frame *f UNUSED) {
  */
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
-  int status = ARG(int, 1);
+  ONE_ARG(int, status);
   exit_process(status);
 }
 
@@ -199,7 +270,7 @@ static void exit(struct intr_frame *f UNUSED) {
  */
 static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
-  char *cmd_line = ARG(char *, 1);
+  ONE_ARG(char *, cmd_line);
 
   char *physical_cmd_line = access_user_memory(
     thread_current()->pagedir,
@@ -221,7 +292,7 @@ static void exec(struct intr_frame *f) {
  */
 static void wait(struct intr_frame *f) {
   // int wait(pid_t pid)
-  int pid = ARG(int, 1);
+  ONE_ARG(int, pid);
   f->eax = process_wait(pid);
 }
 
@@ -231,8 +302,10 @@ static void wait(struct intr_frame *f) {
  */
 static void create(struct intr_frame *f) {
   // bool create(const char *file, unsigned initial_size)
-  const char *user_filename = ARG(const char *, 1);
-  unsigned initial_size = ARG(unsigned , 2);
+  TWO_ARG(
+    const char *, user_filename,
+    unsigned, initial_size
+  );
 
   //Access memory
   const char *physical_filename = access_user_memory(
@@ -260,7 +333,7 @@ static void create(struct intr_frame *f) {
  */
 static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
-  const char *user_filename = ARG(const char *, 1);
+  ONE_ARG(const char *, user_filename);
 
   //Access memory
   const char *physical_filename = access_user_memory(
@@ -288,8 +361,9 @@ static void remove_handler(struct intr_frame *f) {
  */
 static void open(struct intr_frame *f) {
   // int open(const char *file)
+  ONE_ARG(const char *, user_filename);
+
   struct thread *cur_thread = thread_current();
-  const char *user_filename = ARG(const char *, 1);
   const char *physical_filename = access_user_memory(
     cur_thread->pagedir,
     user_filename
@@ -333,7 +407,8 @@ static void open(struct intr_frame *f) {
  */
 static void filesize(struct intr_frame *f) {
   // int filesize(int fd)
-  int fd = ARG(int, 1);
+  ONE_ARG(int, fd);
+
   struct fd_entry fd_to_find;
   fd_to_find.fd = fd;
 
@@ -361,9 +436,12 @@ static void filesize(struct intr_frame *f) {
  */
 static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
-  int fd = ARG(int, 1);
-  const void *user_buffer = ARG(const void *, 2);
-  unsigned size = ARG(unsigned, 3);
+  THREE_ARG(
+    int, fd,
+    const void *, user_buffer,
+    unsigned, size
+  );
+
 
   const char *buffer = access_user_memory(
     thread_current()->pagedir,
@@ -425,8 +503,10 @@ static void write(struct intr_frame *f) {
  */
 static void seek(struct intr_frame *f) {
   // void seek(int fd, unsigned position)
-  int fd = ARG(int, 1);
-  unsigned position = ARG(unsigned, 2);
+  TWO_ARG(
+    int, fd,
+    unsigned, position
+  );
 
   // Search up the fd-file mapping from the fd table.
   struct fd_entry fd_to_find;
@@ -452,7 +532,7 @@ static void seek(struct intr_frame *f) {
  */
 static void tell(struct intr_frame *f) {
   // unsigned tell(int fd)
-  int fd = ARG(int, 1);
+  ONE_ARG(int, fd);
 
   // Search up the fd-file mapping from the fd table.
   struct fd_entry fd_to_find;
@@ -480,7 +560,7 @@ static void tell(struct intr_frame *f) {
  */
 static void close(struct intr_frame *f UNUSED) {
   // void close(int fd)
-  int fd = ARG(int, 1);
+  ONE_ARG(int, fd);
 
   // Search up the fd-file mapping from the fd table.
   struct fd_entry fd_to_find;
