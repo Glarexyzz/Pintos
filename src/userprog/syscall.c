@@ -201,7 +201,7 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   char *cmd_line = ARG(char *, 1);
 
-  char* physical_cmd_line = access_user_memory(
+  char *physical_cmd_line = access_user_memory(
     thread_current()->pagedir,
     cmd_line
   );
