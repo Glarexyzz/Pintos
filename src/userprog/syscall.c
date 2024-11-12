@@ -240,8 +240,8 @@ static void read(struct intr_frame *f) {
   	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
-  	  exit_process(-1);
-  	  NOT_REACHED();
+      f->eax = -1;
+      return;
   	}
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
