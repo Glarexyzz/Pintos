@@ -36,7 +36,7 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
 
 void close_file(struct hash_elem *element, void *aux UNUSED);
 static void exit_process(int status) NO_RETURN;
-static const void *access_user_memory(uint32_t *pd, const void *uaddr);
+static void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
 
 static void syscall_not_implemented(struct intr_frame *f);
@@ -158,7 +158,7 @@ static void exit_process(int status) {
  * @remark If NULL is returned, the caller should free its resources and call
  * exit_process(-1).
  */
-static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
+static void *access_user_memory(uint32_t *pd, const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
   if (!is_user_vaddr(uaddr)) {
 	return NULL;
