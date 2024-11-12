@@ -271,12 +271,10 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
  * Iterates over all pages to read mapped by the buffer of given size,
  * applying the foreach function to each page with the size of the section of
  * buffer in that page, and the state.
- * The function panics if the buffer does not map to a block of memory owned
- * by the user, so this must be checked beforehand.
+ * Exits the process if the buffer does not map to a block of memory owned
+ * by the user.
  * Care must be taken to ensure that the foreach function does not attempt to
  * write to read-only data, if the provided `user_buffer` is also read-only.
- * @pre `user_buffer` is owned completely by the user (checked by
- * `user_owns_memory_range`).
  * @param user_buffer The virtual (user) address to the buffer.
  * @param size The size of the buffer provided by the user.
  * @param f Iterator function to handle a part of the buffer in one page.
