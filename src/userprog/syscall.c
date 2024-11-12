@@ -46,8 +46,12 @@ typedef void (*block_foreach_func) (void *, unsigned, void *);
  * Iterates over all pages to read mapped by the buffer of given size,
  * applying the foreach function to each page with the size of the section of
  * buffer in that page, and the state.
+ * The function panics if the buffer does not map to a block of memory owned
+ * by the user, so this must be checked beforehand.
  * Care must be taken to ensure that the foreach function does not attempt to
  * write to read-only data, if the provided `user_buffer` is also read-only.
+ * @pre `user_buffer` is owned completely by the user (checked by
+ * `user_owns_memory_range`).
  * @param user_buffer The virtual (user) address to the buffer.
  * @param size The size of the buffer provided by the user.
  * @param f Iterator function to handle a part of the buffer in one page.
@@ -274,7 +278,11 @@ static void buffer_pages_foreach(
   uint32_t *pd = thread_current()->pagedir;
   void *buffer = access_user_memory(pd, user_buffer);
   if (!user_owns_memory_range(user_buffer, size))
-    return;
+    PANIC(
+      "User-provided buffer %p with size %u not owned by user",
+      user_buffer,
+      size
+    );
   ASSERT(buffer != NULL);
   // The trivial case, when the entire buffer fits inside the page.
   unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
