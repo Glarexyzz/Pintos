@@ -60,7 +60,7 @@ typedef void (*block_foreach_func) (void *, unsigned, void *);
 static void buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
-  block_foreach_func *f,
+  block_foreach_func f,
   void *state
 );
 
@@ -272,7 +272,7 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
 static void buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
-  block_foreach_func *f,
+  block_foreach_func f,
   void *state
 ) {
   uint32_t *pd = thread_current()->pagedir;
