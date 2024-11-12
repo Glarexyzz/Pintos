@@ -586,8 +586,26 @@ static void close(struct intr_frame *f UNUSED) {
 static void
 syscall_handler (struct intr_frame *f)
 {
-  uint32_t syscall_no = *(uint32_t *)f->esp;
-  ASSERT(syscall_no < sizeof(syscall_handlers) / sizeof(syscall_handler_func));
-  printf("System call with code: %d\n", syscall_no);
+  uint32_t *syscall_no_addr = f->esp;
+
+  uint32_t *physical_syscall_no_addr = access_user_memory(
+    thread_current()->pagedir,
+    syscall_no_addr
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_syscall_no_addr == NULL) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
+  uint32_t syscall_no = *physical_syscall_no_addr;
+
+  if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
+
   (*syscall_handlers[syscall_no])(f);
 }
