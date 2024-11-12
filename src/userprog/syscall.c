@@ -114,7 +114,7 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
  */
 typedef void (*block_foreach_func) (void *, unsigned, void *);
 
-static void buffer_pages_foreach(
+static bool buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
   block_foreach_func f,
@@ -450,8 +450,7 @@ static void buffer_pages_foreach(
   uint32_t *pd = thread_current()->pagedir;
   void *buffer = access_user_memory(pd, user_buffer);
   if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(-1);
-    NOT_REACHED();
+    return false;
   }
   ASSERT(buffer != NULL);
   // The trivial case, when the entire buffer fits inside the page.
@@ -560,8 +559,17 @@ static void read(struct intr_frame *f) {
   if (fd == 0) {
     // Read from the console.
     lock_acquire(&console_lock);
-    buffer_pages_foreach(buffer, size, &buffer_page_record_stdin, NULL);
+    bool success = buffer_pages_foreach(
+      buffer,
+      size,
+      &buffer_page_record_stdin,
+      NULL
+    );
     lock_release(&console_lock);
+    if (!success) {
+      thread_exit(-1);
+      NOT_REACHED();
+    }
     // Given the original memory is valid, we will record all `size` bytes
     // from stdin.
     bytes_read = size;
@@ -589,8 +597,17 @@ static void read(struct intr_frame *f) {
     state.bytes_read = 0;
 
     lock_acquire(&file_system_lock);
-    buffer_pages_foreach(buffer, size, &buffer_page_file_read, &state);
+    bool success = buffer_pages_foreach(
+      buffer,
+      size,
+      &buffer_page_file_read,
+      &state
+    );
     lock_release(&file_system_lock);
+    if (!success) {
+      thread_exit(-1);
+      NOT_REACHED();
+    }
 
     bytes_read = state.bytes_read;
   }
@@ -657,9 +674,17 @@ static void write(struct intr_frame *f) {
     // Console write
 
     lock_acquire(&console_lock);
-    buffer_pages_foreach(user_buffer, size, &buffer_page_print, NULL);
+    bool success = buffer_pages_foreach(
+      user_buffer,
+      size,
+      &buffer_page_print,
+      NULL
+    );
     lock_release(&console_lock);
-
+    if (!success) {
+      thread_exit(-1);
+      NOT_REACHED();
+    }
     // Given the original memory is valid, putbuf will succeed
     // so all bytes will have been written.
     f->eax = size;
