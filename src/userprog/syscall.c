@@ -302,7 +302,7 @@ static void open(struct intr_frame *f) {
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (physical_filename == NULL) {
-    f->eax = -1;
+    exit_user_process(-1);
     return;
   }
 
