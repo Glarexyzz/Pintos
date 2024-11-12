@@ -432,16 +432,17 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
  * Iterates over all pages to read mapped by the buffer of given size,
  * applying the foreach function to each page with the size of the section of
  * buffer in that page, and the state.
- * Exits the process if the buffer does not map to a block of memory owned
- * by the user.
+ * Fails, returning false, if the buffer does not map to a block of memory
+ * owned by the user.
  * Care must be taken to ensure that the foreach function does not attempt to
  * write to read-only data, if the provided `user_buffer` is also read-only.
  * @param user_buffer The virtual (user) address to the buffer.
  * @param size The size of the buffer provided by the user.
  * @param f Iterator function to handle a part of the buffer in one page.
  * @param state State for the helper function to use.
+ * @return `true` if and only if accessing the entire buffer succeeded.
  */
-static void buffer_pages_foreach(
+static bool buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
   block_foreach_func f,
@@ -567,7 +568,7 @@ static void read(struct intr_frame *f) {
     );
     lock_release(&console_lock);
     if (!success) {
-      thread_exit(-1);
+      exit_user_process(-1);
       NOT_REACHED();
     }
     // Given the original memory is valid, we will record all `size` bytes
@@ -605,7 +606,7 @@ static void read(struct intr_frame *f) {
     );
     lock_release(&file_system_lock);
     if (!success) {
-      thread_exit(-1);
+      exit_user_process(-1);
       NOT_REACHED();
     }
 
@@ -682,7 +683,7 @@ static void write(struct intr_frame *f) {
     );
     lock_release(&console_lock);
     if (!success) {
-      thread_exit(-1);
+      exit_user_process(-1);
       NOT_REACHED();
     }
     // Given the original memory is valid, putbuf will succeed
