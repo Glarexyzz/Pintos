@@ -46,6 +46,12 @@ static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
 static void write(struct intr_frame *f);
 
+/**
+ * Lock for reading to and writing from the console.
+ * Unlike the built-in lock, this is not reentrant.
+ */
+struct lock console_lock;
+
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
   &halt,
@@ -68,6 +74,7 @@ const syscall_handler_func syscall_handlers[] = {
 void
 syscall_init (void) 
 {
+  lock_init(&console_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -232,8 +239,13 @@ static void read(struct intr_frame *f) {
 
   if (fd == 0) {
     // Read from the console.
+    lock_acquire(&console_lock);
+
     for (unsigned i = 0; i < size; i++)
       ((uint8_t *)buffer)[i] = input_getc();
+
+    lock_release(&console_lock);
+
     bytes_read = size;
   } else {
     // Read from file
@@ -273,6 +285,8 @@ static void write(struct intr_frame *f) {
 
     unsigned bytes_written;
 
+    lock_acquire(&console_lock);
+
     // Keep writing MAX_WRITE_SIZE bytes as long as it's less than size
     for (
       bytes_written = 0;
@@ -284,6 +298,8 @@ static void write(struct intr_frame *f) {
 
     // Write the remaining bytes
     putbuf(buffer + bytes_written, size - bytes_written);
+
+    lock_release(&console_lock);
 
     // Assume all bytes have been written
     f->eax = size;
