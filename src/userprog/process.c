@@ -483,6 +483,74 @@ process_wait (tid_t child_tid)
   return child_status;
 }
 
+/**
+* The hash_action_func used to close the file in fd_entry struct and free the
+* memory.
+* @param element The hash_elem of the file descriptor in the fd table.
+* @param aux (UNUSED).
+*/
+void close_file(struct hash_elem *element, void *aux UNUSED) {
+  struct fd_entry *fd_entry = hash_entry(element, struct fd_entry, elem);
+  lock_acquire(&file_system_lock);
+  file_close(fd_entry->file);
+  lock_release(&file_system_lock);
+  free(fd_entry);
+}
+
+/**
+ * Exits a user program with the provided status code.
+ * @param status The exit status code.
+ */
+void exit_user_process(int status) {
+
+  struct thread *cur_thread = thread_current();
+
+  // When a process exits, we must update its exit status in the user_processes
+  // hashmap, and up its semaphore
+
+  // Setup to find the current process in the user_processes hashmap
+  struct process_status process_to_find;
+  process_to_find.tid = cur_thread->tid;
+
+  lock_acquire(&user_processes_lock);
+
+  // Check if this process has an entry in the user_processes hashmap
+  struct hash_elem *process_found_elem = hash_find(
+    &user_processes,
+    &process_to_find.elem
+  );
+
+  // We must keep the user_processes_lock here since the parent of this process
+  // reserves the right to delete the entry corresponding to this process at any
+  // time, possibly while we're modifying it
+
+  // If the process does have an entry
+  if (process_found_elem != NULL) {
+    // Get the process's entry
+    struct process_status *process_found = hash_entry(
+      process_found_elem,
+    struct process_status,
+    elem
+    );
+
+    // Update the entry's exit status and up its semaphore to unblock its waiter
+    process_found->status = status;
+    sema_up(&process_found->sema);
+  }
+
+  lock_release(&user_processes_lock);
+
+  // Close all the files and free all the file descriptors,
+  // and the file descriptor table
+  hash_destroy(&cur_thread->fd_table, &close_file);
+
+  // Print the exit status
+  printf("%s: exit(%d)\n", thread_current()->name, status);
+
+  // Free the process's resources.
+  thread_exit();
+}
+
 /* Free the current process's resources. */
 void
 process_exit (void)

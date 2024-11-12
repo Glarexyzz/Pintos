@@ -24,7 +24,7 @@
     arg ## number ## _                                       \
   );                                                         \
   if (arg ## number ## _kernel_ == NULL) {                   \
-    exit_process(-1);                                        \
+    exit_user_process(-1);                                   \
     NOT_REACHED();                                           \
   }                                                          \
   t1 n1 = *((t1 *) arg ## number ## _kernel_);
@@ -105,8 +105,6 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
-void close_file(struct hash_elem *element, void *aux UNUSED);
-static void exit_process(int status) NO_RETURN;
 static const void *access_user_memory(uint32_t *pd, const void *uaddr);
 static void syscall_handler (struct intr_frame *);
 
@@ -150,74 +148,6 @@ syscall_init (void)
 }
 
 /**
-* The hash_action_func used to close the file in fd_entry struct and free the
-* memory.
-* @param element The hash_elem of the file descriptor in the fd table.
-* @param aux (UNUSED).
-*/
-void close_file(struct hash_elem *element, void *aux UNUSED) {
-  struct fd_entry *fd_entry = hash_entry(element, struct fd_entry, elem);
-  lock_acquire(&file_system_lock);
-  file_close(fd_entry->file);
-  lock_release(&file_system_lock);
-  free(fd_entry);
-}
-
-/**
- * Exits a user program with the provided status code.
- * @param status The exit status code.
- */
-static void exit_process(int status) {
-
-  struct thread *cur_thread = thread_current();
-
-  // When a process exits, we must update its exit status in the user_processes
-  // hashmap, and up its semaphore
-
-  // Setup to find the current process in the user_processes hashmap
-  struct process_status process_to_find;
-  process_to_find.tid = cur_thread->tid;
-
-  lock_acquire(&user_processes_lock);
-
-  // Check if this process has an entry in the user_processes hashmap
-  struct hash_elem *process_found_elem = hash_find(
-    &user_processes,
-    &process_to_find.elem
-  );
-
-  // We must keep the user_processes_lock here since the parent of this process
-  // reserves the right to delete the entry corresponding to this process at any
-  // time, possibly while we're modifying it
-
-  // If the process does have an entry
-  if (process_found_elem != NULL) {
-    // Get the process's entry
-    struct process_status *process_found = hash_entry(
-      process_found_elem,
-      struct process_status,
-      elem
-    );
-
-    // Update the entry's exit status and up its semaphore to unblock its waiter
-    process_found->status = status;
-    sema_up(&process_found->sema);
-  }
-
-  lock_release(&user_processes_lock);
-
-  // Close all the files and free all the file descriptors,
-  // and the file descriptor table
-  hash_destroy(&cur_thread->fd_table, &close_file);
-
-  // Print the exit status
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-
-  // Free the process's resources.
-  thread_exit();
-}
-
-/**
  * Get the kernel virtual address of a virtual user address from the page
  * directory provided.
  * @param pd The page directory from which to read.
@@ -226,7 +156,7 @@ static void exit_process(int status) {
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
  * @remark If NULL is returned, the caller should free its resources and call
- * exit_process(-1).
+ * exit_user_process(-1).
  */
 static const void *access_user_memory(uint32_t *pd, const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
@@ -261,7 +191,7 @@ static void halt(struct intr_frame *f UNUSED) {
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   ONE_ARG(int, status);
-  exit_process(status);
+  exit_user_process(status);
 }
 
 /**
@@ -279,7 +209,7 @@ static void exec(struct intr_frame *f) {
 
   // Terminate process if pointer is invalid.
   if (physical_cmd_line == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
@@ -316,7 +246,7 @@ static void create(struct intr_frame *f) {
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (physical_filename == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
@@ -344,7 +274,7 @@ static void remove_handler(struct intr_frame *f) {
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (physical_filename == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
@@ -418,7 +348,7 @@ static void filesize(struct intr_frame *f) {
     &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
@@ -450,7 +380,7 @@ static void write(struct intr_frame *f) {
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (buffer == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
@@ -484,7 +414,7 @@ static void write(struct intr_frame *f) {
   	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
-  	  exit_process(-1);
+  	  exit_user_process(-1);
   	  NOT_REACHED();
   	}
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
@@ -516,7 +446,7 @@ static void seek(struct intr_frame *f) {
     &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
@@ -542,7 +472,7 @@ static void tell(struct intr_frame *f) {
     &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
@@ -570,7 +500,7 @@ static void close(struct intr_frame *f UNUSED) {
     &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
@@ -596,14 +526,14 @@ syscall_handler (struct intr_frame *f)
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (physical_syscall_no_addr == NULL) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
   uint32_t syscall_no = *physical_syscall_no_addr;
 
   if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
