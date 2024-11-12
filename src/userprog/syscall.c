@@ -130,8 +130,7 @@ static void exit_process(int status) {
 
   // Close all the files and free all the file descriptors,
   // and the file descriptor table
-  struct hash *fd_table = cur_thread->fd_table;
-  hash_destroy(fd_table, &close_file);
+  hash_destroy(&cur_thread->fd_table, &close_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
@@ -251,18 +250,17 @@ static void close(struct intr_frame *f UNUSED) {
   struct fd_entry fd_to_find;
   fd_to_find.fd = fd;
   struct hash_elem *fd_found_elem = hash_find(
-    thread_current()->fd_table,
+    &thread_current()->fd_table,
     &fd_to_find.elem
   );
   if (fd_found_elem == NULL) {
     exit_process(-1);
     NOT_REACHED();
   }
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
-  lock_acquire(&file_system_lock);
-  file_close(fd_found->file);
-  lock_release(&file_system_lock);
+  // close file, free it, delete from fd_table.
+  close_file(fd_found_elem, NULL);
+  hash_delete(&thread_current()->fd_table, &fd_found_elem);
 }
 
 /**
