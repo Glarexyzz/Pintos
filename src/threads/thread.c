@@ -250,7 +250,7 @@ thread_tick (void)
       thread_foreach(&update_recent_cpu, NULL);
     }
 
-    if ((timer_ticks() & 4) == 4) {
+    if (timer_ticks() % TIME_SLICE == 0) {
       // Update priority for all threads which need it
       struct list_elem *cur_elem = list_begin(&update_pri_list);
       while (cur_elem != list_end(&update_pri_list)) {
@@ -362,6 +362,8 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
+  if (thread_current()->priority < priority && intr_get_level() == INTR_ON)
+    thread_yield();
 
   return tid;
 }
@@ -479,10 +481,6 @@ thread_unblock (struct thread *t)
   ready_list_insert(t);
 
   t->status = THREAD_READY;
-
-  if (thread_current()->priority < t->priority && old_level == INTR_ON) {
-    thread_yield();
-  }
 
   intr_set_level (old_level);
 }
@@ -619,10 +617,22 @@ thread_set_priority (int new_priority)
     }
   }
 
+  int ready_highest_priority = PRI_MIN;
+  if (!list_empty(&ready_list)) {
+    ready_highest_priority = list_entry(
+      list_back(&ready_list),
+      struct thread,
+      elem
+    )->priority;
+  }
+
   intr_set_level (old_level);
 
-  if (old_level == INTR_ON)
-    thread_yield ();
+  if (
+    intr_get_level() == INTR_ON &&
+    current_thread->priority < ready_highest_priority
+  )
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
