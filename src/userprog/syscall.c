@@ -34,6 +34,32 @@
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
 
+/**
+ * Type of auxiliary functions to handle memory held in pages mapped by a given
+ * user's buffer.
+ * Takes a pointer to the kernel address to a given (part or whole) page,
+ * the size of memory in that page, and a helper state.
+ */
+typedef void (*block_foreach_func) (void *, unsigned, void *);
+
+/**
+ * Iterates over all pages to read mapped by the buffer of given size,
+ * applying the foreach function to each page with the size of the section of
+ * buffer in that page, and the state.
+ * Care must be taken to ensure that the foreach function does not attempt to
+ * write to read-only data, if the provided `user_buffer` is also read-only.
+ * @param user_buffer The virtual (user) address to the buffer.
+ * @param size The size of the buffer provided by the user.
+ * @param f Iterator function to handle a part of the buffer in one page.
+ * @param state State for the helper function to use.
+ */
+static void buffer_pages_foreach(
+  void *user_buffer,
+  unsigned size,
+  block_foreach_func *f,
+  void *state
+);
+
 void close_file(struct hash_elem *element, void *aux UNUSED);
 static void exit_process(int status) NO_RETURN;
 static void *access_user_memory(uint32_t *pd, const void *uaddr);
@@ -237,6 +263,52 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
     return false;
   }
   return true;
+}
+
+static void buffer_pages_foreach(
+  void *user_buffer,
+  unsigned size,
+  block_foreach_func *f,
+  void *state
+) {
+  uint32_t *pd = thread_current()->pagedir;
+  void *buffer = access_user_memory(pd, user_buffer);
+  if (!user_owns_memory_range(user_buffer, size))
+    return;
+  ASSERT(buffer != NULL);
+  // The trivial case, when the entire buffer fits inside the page.
+  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
+  if (buffer_end_offset < PGSIZE) {
+      (*f)(buffer, size, state);
+      return;
+  }
+
+  // Otherwise, we have the start of the buffer reaching the end of a page,
+  // an optional number of full pages in the middle of the buffer,
+  // and the end of the buffer possibly ending at a different page.
+
+  // The size occupied in the first page by the buffer.
+  unsigned buffer_start_page_size = 0;
+  if (pg_ofs(user_buffer) != 0) {
+    // Read the first page
+    buffer_start_page_size = PGSIZE - pg_ofs(user_buffer);
+    (*f)(buffer, buffer_start_page_size, state);
+    // Progress to the end of the page
+    user_buffer += buffer_start_page_size;
+    size -= buffer_start_page_size;
+  }
+  // Read all the full pages in the middle of the buffer, plus the
+  // page at the end.
+  while (size > 0) {
+    ASSERT(pg_ofs(user_buffer) == 0);
+    buffer = access_user_memory(pd, user_buffer);
+    ASSERT(buffer != NULL);
+    unsigned consumed = size < PGSIZE ? size : PGSIZE;
+    (*f)(buffer, consumed, state);
+    // If the last page is reached, consumed == size.
+    user_buffer += consumed;
+    size -= consumed;
+  }
 }
 
 /**
