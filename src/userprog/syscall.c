@@ -1,3 +1,4 @@
+#include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
 #include "userprog/syscall.h"
@@ -216,6 +217,8 @@ static void read(struct intr_frame *f) {
   void *user_buffer = ARG(void *, 2);
   unsigned size = ARG(unsigned, 3);
 
+  int bytes_read;
+
   void *buffer = access_user_memory(
     thread_current()->pagedir,
     user_buffer
@@ -228,7 +231,10 @@ static void read(struct intr_frame *f) {
   }
 
   if (fd == 0) {
-
+    // Read from the console.
+    for (unsigned i = 0; i < size; i++)
+      ((uint8_t *)buffer)[i] = input_getc();
+    bytes_read = size;
   } else {
     // Read from file
 
@@ -236,7 +242,7 @@ static void read(struct intr_frame *f) {
   	struct fd_entry fd_to_find;
   	fd_to_find.fd = fd;
   	struct hash_elem *fd_found_elem = hash_find(
-  	  &thread_current()->fd_table,
+  	  thread_current()->fd_table,
   	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
@@ -246,9 +252,10 @@ static void read(struct intr_frame *f) {
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
     lock_acquire(&file_system_lock);
-    int bytes_read = file_read(fd_found->file, buffer, size);
+    bytes_read = file_read(fd_found->file, buffer, size);
     lock_release(&file_system_lock);
   }
+  f->eax = bytes_read;
 }
 
 /**
