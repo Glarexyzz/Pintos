@@ -794,6 +794,7 @@ init_thread (struct thread *t, const char *name, int priority)
   }
 #ifdef USERPROG
   list_init (&t->child_tids);
+  t->is_user = false;
 #endif
 
   t->magic = THREAD_MAGIC;
