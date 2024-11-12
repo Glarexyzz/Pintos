@@ -85,6 +85,20 @@ static void buffer_page_print(
   void *state UNUSED
 );
 
+/**
+ * Reads input from the console, writing it to the given page of the buffer.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for console reads on its own.
+ * @param buffer_page_ The physical address of the portion of the buffer.
+ * @param page_size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void buffer_page_record_stdin(
+  void *buffer_page_,
+  unsigned buffer_page_size,
+  void *state UNUSED
+);
+
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
@@ -334,6 +348,17 @@ static void buffer_pages_foreach(
   }
 }
 
+static void buffer_page_record_stdin(
+  void *buffer_page_,
+  unsigned buffer_page_size,
+  void *state UNUSED
+) {
+  uint8_t *buffer_page = (uint8_t *)buffer_page_;
+  for (unsigned i = 0; i < buffer_page_size; i++) {
+    buffer_page[i] = input_getc();
+  }
+}
+
 /**
  * Handles read system calls.
  * @param f The interrupt stack frame
@@ -352,7 +377,7 @@ static void read(struct intr_frame *f) {
   );
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
-  if (buffer == NULL) {
+  if (!user_owns_memory_range(user_buffer, size)) {
     exit_process(-1);
     NOT_REACHED();
   }
@@ -360,12 +385,10 @@ static void read(struct intr_frame *f) {
   if (fd == 0) {
     // Read from the console.
     lock_acquire(&console_lock);
-
-    for (unsigned i = 0; i < size; i++)
-      ((uint8_t *)buffer)[i] = input_getc();
-
+    buffer_pages_foreach(user_buffer, size, &buffer_page_record_stdin, NULL);
     lock_release(&console_lock);
-
+    // Given the original memory is valid, we will record all `size` bytes
+    // from stdin.
     bytes_read = size;
   } else {
     // Read from file
