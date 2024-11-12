@@ -290,12 +290,10 @@ static void buffer_pages_foreach(
 ) {
   uint32_t *pd = thread_current()->pagedir;
   void *buffer = access_user_memory(pd, user_buffer);
-  if (!user_owns_memory_range(user_buffer, size))
-    PANIC(
-      "User-provided buffer %p with size %u not owned by user",
-      user_buffer,
-      size
-    );
+  if (!user_owns_memory_range(user_buffer, size)) {
+    exit_process(-1);
+    NOT_REACHED();
+  }
   ASSERT(buffer != NULL);
   // The trivial case, when the entire buffer fits inside the page.
   unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
