@@ -544,6 +544,10 @@ void exit_user_process(int status) {
   // and the file descriptor table
   hash_destroy(&cur_thread->fd_table, &close_file);
 
+  // Close the executable file pointer, allowing writes again.
+  ASSERT(cur_thread->executable_file != NULL);
+  file_close(cur_thread->executable_file);
+
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
@@ -556,10 +560,6 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-
-  // Close the executable file pointer, allowing writes again.
-  ASSERT(cur->executable_file != NULL);
-  file_close(cur->executable_file);
 
   // When a process exits, we must delete all its child processes from the
   // user_processes hashmap, since no processes can wait for them anymore
