@@ -506,8 +506,8 @@ static void close(struct intr_frame *f UNUSED) {
   }
 
   // close file, free it, delete from fd_table.
-  close_file(fd_found_elem, NULL);
   hash_delete(&thread_current()->fd_table, fd_found_elem);
+  close_file(fd_found_elem, NULL);
 }
 
 /**
