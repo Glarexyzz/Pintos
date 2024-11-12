@@ -457,8 +457,8 @@ static bool buffer_pages_foreach(
   // The trivial case, when the entire buffer fits inside the page.
   unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
   if (buffer_end_offset < PGSIZE) {
-      (*f)(buffer, size, state);
-      return;
+    (*f)(buffer, size, state);
+    return true;
   }
 
   // Otherwise, we have the start of the buffer reaching the end of a page,
@@ -487,6 +487,7 @@ static bool buffer_pages_foreach(
     user_buffer += consumed;
     size -= consumed;
   }
+  return true;
 }
 
 /**
