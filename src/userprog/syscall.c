@@ -1,6 +1,7 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
 #include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
@@ -16,20 +17,91 @@
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
 
+// Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
+#define AN_ARG(t1, n1, number)                               \
+  void *arg ## number ## _ = ((uint32_t *) f->esp)+number;   \
+  void *arg ## number ## _kernel_ = access_user_memory(      \
+    thread_current()->pagedir,                               \
+    arg ## number ## _                                       \
+  );                                                         \
+  if (arg ## number ## _kernel_ == NULL) {                   \
+    exit_user_process(-1);                                   \
+    NOT_REACHED();                                           \
+  }                                                          \
+  t1 n1 = *((t1 *) arg ## number ## _kernel_);
+
 /**
- * Get the argument of type `type` and index `arg_no` from an `intr_frame`
- * @param type The type of the argument
- * @param arg_no The 1-indexed index of the argument
- * @pre The `intr_frame` is called `f` and is in scope
- * @example \code
- * void example(struct intr_frame *f) {
- *   // example(int x, char y)
- *   int x = ARG(int, 1);
- *   char y = ARG(int, 2);
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the argument.
+ * @param n1 The name of the argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg)
+ *   ONE_ARG(const char *, string_arg);
+ *
+ *   // do stuff
  * }
  * \endcode
  */
-#define ARG(type, arg_no) (*((type *) (((uint32_t *) f->esp)+(arg_no))))
+#define ONE_ARG(t1, n1) \
+  AN_ARG(t1, n1, 1)
+
+/**
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the first argument.
+ * @param n1 The name of the first argument.
+ * @param t2 The type of the second argument.
+ * @param n2 The name of the second argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg, int size)
+ *   TWO_ARG(
+ *     const char *, string_arg,
+ *     int, size
+ *   );
+ *
+ *   // do stuff
+ * }
+ * \endcode
+ */
+#define TWO_ARG(t1, n1, t2, n2) \
+  AN_ARG(t1, n1, 1)             \
+  AN_ARG(t2, n2, 2)
+
+/**
+ * Get one argument from the interrupt frame.
+ * @param t1 The type of the first argument.
+ * @param n1 The name of the first argument.
+ * @param t2 The type of the second argument.
+ * @param n2 The name of the second argument.
+ * @param t3 The type of the third argument.
+ * @param n3 The name of the third argument.
+ * @pre The struct intr_frame pointer is in scope and called `f`.
+ * @remark The process will be exited if the stack pointer in the interrupt
+ * frame is invalid.
+ * @example \code{.c}
+ * static void example(struct intr_frame *f) {
+ *   // void example(const char *string_arg, int size, unsigned max)
+ *   THREE_ARG(
+ *     const char *, string_arg,
+ *     int, size,
+ *     unsigned, max
+ *   );
+ *
+ *   // do stuff
+ * }
+ * \endcode
+ */
+#define THREE_ARG(t1, n1, t2, n2, t3, n3) \
+  AN_ARG(t1, n1, 1)                       \
+  AN_ARG(t2, n2, 2)                       \
+  AN_ARG(t3, n3, 3)
 
 /// Type of system call handler functions.
 typedef void (*syscall_handler_func) (struct intr_frame *);
@@ -49,8 +121,6 @@ static void buffer_pages_foreach(
   void *state
 );
 
-void close_file(struct hash_elem *element, void *aux UNUSED);
-static void exit_process(int status) NO_RETURN;
 static void *access_user_memory(uint32_t *pd, const void *uaddr);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
@@ -78,7 +148,15 @@ static void halt(struct intr_frame *f) NO_RETURN;
 static void exit(struct intr_frame *f);
 static void exec(struct intr_frame *f);
 static void wait(struct intr_frame *f);
+static void create(struct intr_frame *f);
+static void remove_handler(struct intr_frame *f);
+static void open(struct intr_frame *f);
+static void filesize(struct intr_frame *f);
+static void read(struct intr_frame *f);
 static void write(struct intr_frame *f);
+static void seek(struct intr_frame *f);
+static void tell(struct intr_frame *f);
+static void close(struct intr_frame *f);
 
 /**
  * Lock for reading to and writing from the console.
@@ -92,15 +170,15 @@ const syscall_handler_func syscall_handlers[] = {
   &exit,
   &exec,
   &wait,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
+  &create,
+  &remove_handler,
+  &open,
+  &filesize,
   &read,
   &write,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
-  &syscall_not_implemented,
+  &seek,
+  &tell,
+  &close,
   &syscall_not_implemented,
   &syscall_not_implemented
 };
@@ -113,75 +191,6 @@ syscall_init (void)
 }
 
 /**
-* The hash_action_func used to close the file in fd_entry struct and free the
-* memory.
-* @param element The hash_elem of the file descriptor in the fd table.
-* @param aux (UNUSED).
-*/
-void close_file(struct hash_elem *element, void *aux UNUSED) {
-  struct fd_entry *fd_entry = hash_entry(element, struct fd_entry, elem);
-  lock_acquire(&file_system_lock);
-  file_close(fd_entry->file);
-  lock_release(&file_system_lock);
-  free(fd_entry);
-}
-
-/**
- * Exits a user program with the provided status code.
- * @param status The exit status code.
- */
-static void exit_process(int status) {
-
-  struct thread *cur_thread = thread_current();
-
-  // When a process exits, we must update its exit status in the user_processes
-  // hashmap, and up its semaphore
-
-  // Setup to find the current process in the user_processes hashmap
-  struct process_status process_to_find;
-  process_to_find.tid = cur_thread->tid;
-
-  lock_acquire(&user_processes_lock);
-
-  // Check if this process has an entry in the user_processes hashmap
-  struct hash_elem *process_found_elem = hash_find(
-    &user_processes,
-    &process_to_find.elem
-  );
-
-  // We must keep the user_processes_lock here since the parent of this process
-  // reserves the right to delete the entry corresponding to this process at any
-  // time, possibly while we're modifying it
-
-  // If the process does have an entry
-  if (process_found_elem != NULL) {
-    // Get the process's entry
-    struct process_status *process_found = hash_entry(
-      process_found_elem,
-      struct process_status,
-      elem
-    );
-
-    // Update the entry's exit status and up its semaphore to unblock its waiter
-    process_found->status = status;
-    sema_up(&process_found->sema);
-  }
-
-  lock_release(&user_processes_lock);
-
-  // Close all the files and free all the file descriptors,
-  // and the file descriptor table
-  struct hash *fd_table = cur_thread->fd_table;
-  hash_destroy(fd_table, &close_file);
-
-  // Print the exit status
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-
-  // Free the process's resources.
-  thread_exit();
-}
-
-/**
  * Get the kernel virtual address of a virtual user address from the page
  * directory provided.
  * @param pd The page directory from which to read.
@@ -190,12 +199,12 @@ static void exit_process(int status) {
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
  * @remark If NULL is returned, the caller should free its resources and call
- * exit_process(-1).
+ * exit_user_process(-1).
  */
 static void *access_user_memory(uint32_t *pd, const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
   if (!is_user_vaddr(uaddr)) {
-	return NULL;
+    return NULL;
   }
 
   return pagedir_get_page(pd, uaddr);
@@ -224,8 +233,8 @@ static void halt(struct intr_frame *f UNUSED) {
  */
 static void exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
-  int status = ARG(int, 1);
-  exit_process(status);
+  ONE_ARG(int, status);
+  exit_user_process(status);
 }
 
 /**
@@ -234,8 +243,20 @@ static void exit(struct intr_frame *f UNUSED) {
  */
 static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
-  char *cmd_line = ARG(char *, 1);
-  f->eax = process_execute(cmd_line);
+  ONE_ARG(char *, cmd_line);
+
+  char *physical_cmd_line = access_user_memory(
+    thread_current()->pagedir,
+    cmd_line
+  );
+
+  // Terminate process if pointer is invalid.
+  if (physical_cmd_line == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
+  f->eax = process_execute(physical_cmd_line);
 }
 
 /**
@@ -243,9 +264,144 @@ static void exec(struct intr_frame *f) {
  * @param f The interrupt stack frame
  */
 static void wait(struct intr_frame *f) {
-  // void wait(pid_t pid)
-  int pid = ARG(int, 1);
+  // int wait(pid_t pid)
+  ONE_ARG(int, pid);
   f->eax = process_wait(pid);
+}
+
+/**
+ * Handles create system calls.
+ * @param f The interrupt stack frame
+ */
+static void create(struct intr_frame *f) {
+  // bool create(const char *file, unsigned initial_size)
+  TWO_ARG(
+    const char *, user_filename,
+    unsigned, initial_size
+  );
+
+  //Access memory
+  const char *physical_filename = access_user_memory(
+      thread_current()->pagedir,
+      user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  bool success = filesys_create(physical_filename, initial_size);
+  lock_release(&file_system_lock);
+
+  f->eax = success;
+}
+
+/**
+ * Handles remove system calls.
+ * @param f The interrupt stack frame
+ */
+static void remove_handler(struct intr_frame *f) {
+  // bool remove(const char *file)
+  ONE_ARG(const char *, user_filename);
+
+  //Access memory
+  const char *physical_filename = access_user_memory(
+      thread_current()->pagedir,
+      user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
+  lock_acquire(&file_system_lock);
+  bool success = filesys_remove(physical_filename);
+  lock_release(&file_system_lock);
+
+  f->eax = success;
+}
+
+/**
+ * Handles open system calls.
+ * @param f The interrupt stack frame
+ */
+static void open(struct intr_frame *f) {
+  // int open(const char *file)
+  ONE_ARG(const char *, user_filename);
+
+  struct thread *cur_thread = thread_current();
+  const char *physical_filename = access_user_memory(
+    cur_thread->pagedir,
+    user_filename
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_filename == NULL) {
+    exit_user_process(-1);
+    return;
+  }
+
+  lock_acquire(&file_system_lock);
+  struct file *new_file = filesys_open(physical_filename);
+  lock_release(&file_system_lock);
+
+  if (new_file == NULL) {
+    f->eax = -1;
+    return;
+  }
+
+  // Initialise the hashmap entry for fd table
+  struct fd_entry *new_fd_entry =
+    malloc(sizeof(struct fd_entry));
+  if (new_fd_entry == NULL) {
+    f->eax = -1;
+    return;
+  }
+
+  new_fd_entry->file = new_file;
+  new_fd_entry->fd = cur_thread->fd_counter++;
+
+  // Add the entry to the FD table
+  hash_insert(&cur_thread->fd_table, &new_fd_entry->elem);
+
+  f->eax = new_fd_entry->fd;
+}
+
+/**
+ * Handles filesize system calls.
+ * @param f The interrupt stack frame
+ */
+static void filesize(struct intr_frame *f) {
+  // int filesize(int fd)
+  ONE_ARG(int, fd);
+
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  // Search up the fd-file mapping from the fd table.
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+  lock_acquire(&file_system_lock);
+  int size = file_length(fd_found->file);
+  lock_release(&file_system_lock);
+
+  f->eax = size;
 }
 
 /**
@@ -294,7 +450,7 @@ static void buffer_pages_foreach(
   uint32_t *pd = thread_current()->pagedir;
   void *buffer = access_user_memory(pd, user_buffer);
   if (!user_owns_memory_range(user_buffer, size)) {
-    exit_process(-1);
+    exit_user_process(-1);
     NOT_REACHED();
   }
   ASSERT(buffer != NULL);
@@ -393,16 +549,18 @@ static void buffer_page_file_read(
  */
 static void read(struct intr_frame *f) {
   // int read(int fd, void *buffer, unsigned size)
-  int fd = ARG(int, 1);
-  void *user_buffer = ARG(void *, 2);
-  unsigned size = ARG(unsigned, 3);
+  THREE_ARG(
+    int, fd,
+    void *, buffer,
+    unsigned, size
+  );
 
   int bytes_read;
 
   if (fd == 0) {
     // Read from the console.
     lock_acquire(&console_lock);
-    buffer_pages_foreach(user_buffer, size, &buffer_page_record_stdin, NULL);
+    buffer_pages_foreach(buffer, size, &buffer_page_record_stdin, NULL);
     lock_release(&console_lock);
     // Given the original memory is valid, we will record all `size` bytes
     // from stdin.
@@ -415,7 +573,7 @@ static void read(struct intr_frame *f) {
   	fd_to_find.fd = fd;
 
   	struct hash_elem *fd_found_elem = hash_find(
-  	  thread_current()->fd_table,
+  	  &thread_current()->fd_table,
   	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
@@ -431,7 +589,7 @@ static void read(struct intr_frame *f) {
     state.bytes_read = 0;
 
     lock_acquire(&file_system_lock);
-    buffer_pages_foreach(user_buffer, size, &buffer_page_file_read, &state);
+    buffer_pages_foreach(buffer, size, &buffer_page_file_read, &state);
     lock_release(&file_system_lock);
 
     bytes_read = state.bytes_read;
@@ -472,13 +630,26 @@ static void buffer_page_print(
  */
 static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
-  int fd = ARG(int, 1);
-  const void *buffer = ARG(const void *, 2);
-  unsigned size = ARG(unsigned, 3);
+  THREE_ARG(
+    int, fd,
+    const void *, user_buffer,
+    unsigned, size
+  );
+
+  const char *buffer = access_user_memory(
+    thread_current()->pagedir,
+    user_buffer
+  );
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (buffer == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
 
   // If we don't own the buffer's memory, the operation is invalid.
-  if (!user_owns_memory_range(buffer, size)) {
-    exit_process(-1);
+  if (!user_owns_memory_range(user_buffer, size)) {
+    exit_user_process(-2);
     NOT_REACHED();
   }
 
@@ -486,13 +657,116 @@ static void write(struct intr_frame *f) {
     // Console write
 
     lock_acquire(&console_lock);
-    buffer_pages_foreach((void *)buffer, size, &buffer_page_print, NULL);
+    buffer_pages_foreach(user_buffer, size, &buffer_page_print, NULL);
     lock_release(&console_lock);
 
     // Given the original memory is valid, putbuf will succeed
     // so all bytes will have been written.
     f->eax = size;
+  } else {
+    // Write to file
+
+    // Search up the fd-file mapping from the fd table.
+  	struct fd_entry fd_to_find;
+  	fd_to_find.fd = fd;
+  	struct hash_elem *fd_found_elem = hash_find(
+  	  &thread_current()->fd_table,
+  	  &fd_to_find.elem
+  	);
+  	if (fd_found_elem == NULL) {
+  	  exit_user_process(-1);
+  	  NOT_REACHED();
+  	}
+  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+    lock_acquire(&file_system_lock);
+    int bytes_written = file_write(fd_found->file, buffer, size);
+    lock_release(&file_system_lock);
+
+    f->eax = bytes_written;
   }
+}
+
+/**
+ * Handles seek system calls.
+ * @param f The interrupt stack frame
+ */
+static void seek(struct intr_frame *f) {
+  // void seek(int fd, unsigned position)
+  TWO_ARG(
+    int, fd,
+    unsigned, position
+  );
+
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+  lock_acquire(&file_system_lock);
+  file_seek(fd_found->file, position);
+  lock_release(&file_system_lock);
+}
+
+/**
+ * Handles tell system calls.
+ * @param f The interrupt stack frame
+ */
+static void tell(struct intr_frame *f) {
+  // unsigned tell(int fd)
+  ONE_ARG(int, fd);
+
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+
+  lock_acquire(&file_system_lock);
+  unsigned position = file_tell(fd_found->file);
+  lock_release(&file_system_lock);
+
+  f->eax = position;
+}
+
+/**
+ * Handles close system calls.
+ * @param f The interrupt stack frame
+ */
+static void close(struct intr_frame *f UNUSED) {
+  // void close(int fd)
+  ONE_ARG(int, fd);
+
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+  if (fd_found_elem == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
+  // close file, free it, delete from fd_table.
+  hash_delete(&thread_current()->fd_table, fd_found_elem);
+  close_file(fd_found_elem, NULL);
 }
 
 /**
@@ -502,8 +776,26 @@ static void write(struct intr_frame *f) {
 static void
 syscall_handler (struct intr_frame *f)
 {
-  uint32_t syscall_no = *(uint32_t *)f->esp;
-  ASSERT(syscall_no < sizeof(syscall_handlers) / sizeof(syscall_handler_func));
-  printf("System call with code: %d\n", syscall_no);
+  uint32_t *syscall_no_addr = f->esp;
+
+  uint32_t *physical_syscall_no_addr = access_user_memory(
+    thread_current()->pagedir,
+    syscall_no_addr
+  );
+
+  // Terminating the offending process and freeing its resources
+  // for invalid pointer address.
+  if (physical_syscall_no_addr == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
+  uint32_t syscall_no = *physical_syscall_no_addr;
+
+  if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+
   (*syscall_handlers[syscall_no])(f);
 }
