@@ -5,11 +5,13 @@
 #include "threads/thread.h"
 #include <hash.h>
 
+/// Used as an entry in the `user_processes` hashmap.
 struct process_status {
-  tid_t tid;
-  struct semaphore sema;
-  int status;
-  struct hash_elem elem;
+  tid_t tid;             // The tid of the process
+  struct semaphore sema; // The semaphore which parents use to wait for the
+                         // process
+  int status;            // The exit status of the process
+  struct hash_elem elem; // Used to insert the element into `user_processes`
 };
 
 /// Used as the thread auxiliary data when new processes are created
@@ -19,15 +21,18 @@ struct new_process_aux {
   char *file_name;       // The name of the file to execute
 };
 
+/// Used in lists on threads to store child processes of that thread
 struct process_tid {
-  tid_t tid;
-  struct list_elem elem;
+  tid_t tid;             // The tid of the child process
+  struct list_elem elem; // Used to insert the element into the parent's
+                         // `child_tids` list
 };
 
+/// Represents a file descriptor
 struct fd_entry {
-  int fd;
-  struct file *file;
-  struct hash_elem elem;
+  int fd;                // The file descriptor number
+  struct file *file;     // The file which it describes
+  struct hash_elem elem; // Used to insert the element into the FD hash table
 };
 
 struct hash user_processes;
