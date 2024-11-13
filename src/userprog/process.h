@@ -14,13 +14,6 @@ struct process_status {
   struct hash_elem elem; // Used to insert the element into `user_processes`
 };
 
-/// Used as the thread auxiliary data when new processes are created
-struct new_process_aux {
-  struct semaphore sema; // The semaphore which process_execute waits for
-  bool status;           // The startup status of the process
-  char *file_name;       // The name of the file to execute
-};
-
 /// Used in lists on threads to store child processes of that thread
 struct process_tid {
   tid_t tid;             // The tid of the child process

@@ -62,6 +62,13 @@ struct pass_args_data {
   char *params_dest;
 };
 
+/// Used as the thread auxiliary data when new processes are created
+struct new_process_aux {
+  struct semaphore sema; // The semaphore which process_execute waits for
+  bool status;           // The startup status of the process
+  char *file_name;       // The name of the file to execute
+};
+
 /**
  * Pushes (and copies) 4 bytes from the given address onto the stack.
  * @pre Both the stack pointer esp and the pointer to data are non-NULL,
