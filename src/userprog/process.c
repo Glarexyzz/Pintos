@@ -305,14 +305,25 @@ process_execute (const char *file_name)
   char executable_name[MAX_FILENAME_LENGTH + 1];
   copy_executable_name(file_name, executable_name);
 
+  // Setup auxiliary data for starting the new process
+  struct new_process_aux aux;
+  sema_init(&aux.sema, 0);
+  aux.file_name = fn_copy;
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (executable_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (executable_name, PRI_DEFAULT, start_process, &aux);
   if (tid == TID_ERROR) {
     palloc_free_page (fn_copy);
   	return tid;
   }
 
+  // The new process was created successfully, so register it
   register_user_process(tid);
+
+  // Wait for the process to either start up successfully, or fail starting up
+  sema_down(&aux.sema);
+
+  if (!aux.status) return -1;
 
   return tid;
 }
@@ -358,9 +369,10 @@ void file_system_lock_init() {
 /* A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *aux_)
 {
-  char *file_name = file_name_;
+  struct new_process_aux *aux = aux_;
+  char *file_name = aux->file_name;
   struct intr_frame if_;
   bool success;
 
@@ -375,14 +387,24 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
+  if (!success) {
+    aux->status = false;
+    sema_up(&aux->sema);
+    thread_exit();
+  }
 
   // Initialise the file descriptor table.
   success = hash_init(&thread_current()->fd_table, fd_hash, fd_smaller, NULL);
-   if (!success)
+  if (!success) {
+    aux->status = false;
+    sema_up(&aux->sema);
     thread_exit ();
+  }
   thread_current()->fd_counter = 2;
+
+  // Start-up successful
+  aux->status = true;
+  sema_up(&aux->sema);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
