@@ -7,6 +7,7 @@
 #include "userprog/process.h"
 #include <hash.h>
 #include <stdio.h>
+#include <string.h>
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
@@ -19,21 +20,19 @@
 
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
 #define AN_ARG(t1, n1, number)                               \
-  void *arg ## number ## _ = ((uint32_t *) f->esp)+number;   \
-  if (arg ## number ## _kernel_ % sizeof(uintptr_t) != 0) {  \
-    /* bad pointer alignment */                              \
+  void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
+  t1 n1;                                                     \
+  void *start ## number ## _kernel = (void *) &n1;           \
+  /* copy argument, which may be on separate pages */        \
+  if (!buffer_pages_foreach(                                 \
+    arg ## number ## _,                                      \
+    sizeof(t1),                                              \
+    &buffer_page_copy,                                       \
+    (void *) &start ## number ## _kernel                     \
+  )) {                                                       \
     exit_user_process(-1);                                   \
     NOT_REACHED();                                           \
-  }                                                          \
-  void *arg ## number ## _kernel_ = access_user_memory(      \
-    thread_current()->pagedir,                               \
-    arg ## number ## _                                       \
-  );                                                         \
-  if (arg ## number ## _kernel_ == NULL) {                   \
-    exit_user_process(-1);                                   \
-    NOT_REACHED();                                           \
-  }                                                          \
-  t1 n1 = *((t1 *) arg ## number ## _kernel_);
+  }
 
 /**
  * Get one argument from the interrupt frame.
@@ -132,6 +131,11 @@ static void syscall_handler (struct intr_frame *);
 
 // Helper functions for reading to and writing from buffer pages.
 
+static void buffer_page_copy(
+  void *buffer_page,
+  unsigned buffer_page_size,
+  void *state
+);
 static void buffer_page_print(
   void *buffer_page_,
   unsigned buffer_page_size,
@@ -189,7 +193,7 @@ const syscall_handler_func syscall_handlers[] = {
 };
 
 void
-syscall_init (void) 
+syscall_init (void)
 {
   lock_init(&console_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
@@ -213,6 +217,29 @@ static void *access_user_memory(uint32_t *pd, const void *uaddr) {
   }
 
   return pagedir_get_page(pd, uaddr);
+}
+
+/**
+ * Takes a pointer to a memory address, and copies buffer_page_size bytes from
+ * the beginning of the address stored at `state`, also incrementing the
+ * address by `buffer_page_size` bytes.
+ * @param buffer_page_
+ * @param buffer_page_size
+ * @param state The address (of type `uint8_t **`) to the value being copied
+ * (and incremented).
+ */
+static void buffer_page_copy(
+    void *buffer_page,
+    unsigned buffer_page_size,
+    void *state
+) {
+  uint8_t **start = (uint8_t **)state;
+  memcpy(
+    (void *)*start,
+    (const void *)buffer_page,
+    (unsigned long)buffer_page_size
+  );
+  *start += buffer_page_size;
 }
 
 /**
