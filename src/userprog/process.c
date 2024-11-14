@@ -242,7 +242,7 @@ void user_process_hashmap_init() {
     &user_process_tid_smaller,
     NULL
   );
-  ASSERT(success);
+  if (!success) PANIC("Could not initialise the user programs hashmap!");
   lock_init(&user_processes_lock);
 }
 
