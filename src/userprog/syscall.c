@@ -20,6 +20,11 @@
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
 #define AN_ARG(t1, n1, number)                               \
   void *arg ## number ## _ = ((uint32_t *) f->esp)+number;   \
+  if (arg ## number ## _kernel_ % sizeof(uintptr_t) != 0) {  \
+    /* bad pointer alignment */                              \
+    exit_user_process(-1);                                   \
+    NOT_REACHED();                                           \
+  }                                                          \
   void *arg ## number ## _kernel_ = access_user_memory(      \
     thread_current()->pagedir,                               \
     arg ## number ## _                                       \
