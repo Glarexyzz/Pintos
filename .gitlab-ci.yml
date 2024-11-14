@@ -29,14 +29,14 @@ build-pintos:
       when: on_success
       allow_failure: false
 
-# Run the tests for task 0
-test-task-0:
+# Run the tests for task 2
+test-task-2:
   stage: test
   dependencies:
     - build-pintos
   script:
     - source .env    # Load the environment variables
-    - cd src/devices
+    - cd src/userprog
     - make
     - cd build
     - make check | tee check_output.log
@@ -57,6 +57,26 @@ test-task-1:
   script:
     - source .env    # Load the environment variables
     - cd src/threads
+    - make
+    - cd build
+    - make check | tee check_output.log
+    - if grep -q "FAIL" check_output.log; then echo "Failure."; exit 1; fi
+  rules:
+    # Run this job when there is an open MR to master or on commits to branches with an open MR to master
+    - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    - if: '$CI_COMMIT_BRANCH'
+      when: on_success
+      allow_failure: false
+
+# Run the tests for task 0
+test-task-0:
+  stage: test
+  dependencies:
+    - build-pintos
+  script:
+    - source .env    # Load the environment variables
+    - cd src/devices
     - make
     - cd build
     - make check | tee check_output.log
