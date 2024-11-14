@@ -404,19 +404,11 @@ start_process (void *aux_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) {
-    aux->status = false;
-    sema_up(&aux->sema);
-    thread_exit();
-  }
+  if (!success) goto startup_failure;
 
   // Initialise the file descriptor table.
   success = hash_init(&thread_current()->fd_table, fd_hash, fd_smaller, NULL);
-  if (!success) {
-    aux->status = false;
-    sema_up(&aux->sema);
-    thread_exit ();
-  }
+  if (!success) goto startup_failure;
   thread_current()->fd_counter = 2; /* Can't use the numbers 0 or 1 -
                                        these refer to the console. */
 
@@ -426,11 +418,7 @@ start_process (void *aux_)
   struct process_status *new_child_status =
     malloc(sizeof(struct process_status));
 
-  if (new_child_status == NULL) {
-    aux->status = false;
-    sema_up(&aux->sema);
-    thread_exit ();
-  }
+  if (new_child_status == NULL) goto startup_failure;
 
   new_child_status->tid = thread_current()->tid;
   sema_init(&new_child_status->sema, 0);
@@ -452,6 +440,14 @@ start_process (void *aux_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+
+  startup_failure:
+
+  // Signal to the process's parent that start-up was not successful
+  aux->status = false;
+  sema_up(&aux->sema);
+
+  thread_exit ();
 }
 
 /* Waits for thread TID to die and returns its exit status. 
