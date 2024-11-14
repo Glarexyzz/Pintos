@@ -996,14 +996,16 @@ setup_stack (void **esp, const char* file_name)
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
-      if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true))
-        goto fail;
+      if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true)) {
+        palloc_free_page(kpage);
+        return false;
+      }
       *esp = PHYS_BASE;
 
       // Decrement the stack pointer.
       struct pass_args_data pass_args_data;
       if (!parse_argument_string(file_name, esp, &pass_args_data))
-        goto fail;
+        return false;
 
       // Populate the stack.
       bool second_pass =
@@ -1012,10 +1014,6 @@ setup_stack (void **esp, const char* file_name)
       ASSERT(second_pass);
     }
   return true;
-
- fail:
-  palloc_free_page(kpage);
-  return false;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
