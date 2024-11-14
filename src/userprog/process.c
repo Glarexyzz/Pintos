@@ -425,6 +425,13 @@ start_process (void *aux_)
   // Initialise the user_processes hashmap entry for this process
   struct process_status *new_child_status =
     malloc(sizeof(struct process_status));
+
+  if (new_child_status == NULL) {
+    aux->status = false;
+    sema_up(&aux->sema);
+    thread_exit ();
+  }
+
   new_child_status->tid = thread_current()->tid;
   sema_init(&new_child_status->sema, 0);
 
