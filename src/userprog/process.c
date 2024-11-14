@@ -40,7 +40,6 @@ static bool user_process_tid_smaller(
   void *aux UNUSED
 );
 void user_process_hashmap_init(void);
-void register_user_process(tid_t tid);
 
 static unsigned fd_hash(
   const struct hash_elem *element,
@@ -247,31 +246,6 @@ void user_process_hashmap_init() {
 }
 
 /**
- * Register a new user process for process waiting.
- * @param tid The thread ID of the new process.
- * @pre The calling thread is the parent process of the new process.
- */
-void register_user_process(tid_t tid) {
-  // Initialise the hashmap entry
-  struct process_status *new_child_status =
-    malloc(sizeof(struct process_status));
-  new_child_status->tid = tid;
-  sema_init(&new_child_status->sema, 0);
-
-  // Add the entry to the hashmap
-  lock_acquire(&user_processes_lock);
-  hash_insert(&user_processes, &new_child_status->elem);
-  lock_release(&user_processes_lock);
-
-  // Initialise the tid entry
-  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
-  new_child_tid->tid = tid;
-
-  // Add the child tid elem to the current parent process's child_tids list.
-  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
-}
-
-/**
  * Copies the first word of file_name, which is the executable name that has a
  * max length of MAX_FILENAME_LENGTH.
  * @param file_name A String containing the executable name and arguments.
@@ -324,13 +298,49 @@ process_execute (const char *file_name)
   	return tid;
   }
 
-  // The new process was created successfully, so register it
-  register_user_process(tid);
-
   // Wait for the process to either start up successfully, or fail starting up
   sema_down(&aux.sema);
 
-  if (!aux.status) return -1;
+  // Process failed to start up
+  if (!aux.status) return TID_ERROR;
+
+  // Process successfully started up - add its TID to the parent's
+  // (current thread's) list of child TIDs.
+
+  // Initialise the tid entry
+  struct process_tid *new_child_tid_struct =
+    malloc(sizeof(struct process_tid));
+
+  if (new_child_tid_struct == NULL) {
+    // Remove the child's entry from the processes hashmap, since the parent
+    // can never wait for it
+
+    // Find and delete the child's entry in the hashmap
+    struct process_status process_to_find;
+    process_to_find.tid = tid;
+
+    lock_acquire(&user_processes_lock);
+    struct hash_elem *child_process_elem = hash_delete(
+      &user_processes,
+      &process_to_find.elem
+    );
+    lock_release(&user_processes_lock);
+
+    // Free the child's entry struct
+    struct process_status *child_process_entry = hash_entry(
+      child_process_elem,
+      struct process_status,
+      elem
+    );
+    free(child_process_entry);
+
+    return TID_ERROR;
+  }
+
+  new_child_tid_struct->tid = tid;
+
+  // Add the child tid elem to the current parent process's child_tids list.
+  list_push_back(&thread_current()->child_tids, &new_child_tid_struct->elem);
 
   return tid;
 }
@@ -394,22 +404,31 @@ start_process (void *aux_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) {
-    aux->status = false;
-    sema_up(&aux->sema);
-    thread_exit();
-  }
+  if (!success) goto startup_failure;
 
   // Initialise the file descriptor table.
   success = hash_init(&thread_current()->fd_table, fd_hash, fd_smaller, NULL);
-  if (!success) {
-    aux->status = false;
-    sema_up(&aux->sema);
-    thread_exit ();
-  }
-  thread_current()->fd_counter = 2;
+  if (!success) goto startup_failure;
+  thread_current()->fd_counter = 2; /* Can't use the numbers 0 or 1 -
+                                       these refer to the console. */
 
   // Start-up successful
+
+  // Initialise the user_processes hashmap entry for this process
+  struct process_status *new_child_status =
+    malloc(sizeof(struct process_status));
+
+  if (new_child_status == NULL) goto startup_failure;
+
+  new_child_status->tid = thread_current()->tid;
+  sema_init(&new_child_status->sema, 0);
+
+  // Add the entry to the hashmap
+  lock_acquire(&user_processes_lock);
+  hash_insert(&user_processes, &new_child_status->elem);
+  lock_release(&user_processes_lock);
+
+  // Signal to the process's parent that start-up was successful
   aux->status = true;
   sema_up(&aux->sema);
 
@@ -421,6 +440,14 @@ start_process (void *aux_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+
+  startup_failure:
+
+  // Signal to the process's parent that start-up was not successful
+  aux->status = false;
+  sema_up(&aux->sema);
+
+  thread_exit ();
 }
 
 /* Waits for thread TID to die and returns its exit status. 
