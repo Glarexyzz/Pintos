@@ -668,7 +668,7 @@ static void write(struct intr_frame *f) {
 
   // If we don't own the buffer's memory, the operation is invalid.
   if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(-2);
+    exit_user_process(-1);
     NOT_REACHED();
   }
 
