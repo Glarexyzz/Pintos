@@ -308,11 +308,39 @@ process_execute (const char *file_name)
   // (current thread's) list of child TIDs.
 
   // Initialise the tid entry
-  struct process_tid *new_child_tid = malloc(sizeof(struct process_tid));
-  new_child_tid->tid = tid;
+  struct process_tid *new_child_tid_struct =
+    malloc(sizeof(struct process_tid));
+
+  if (new_child_tid_struct == NULL) {
+    // Remove the child's entry from the processes hashmap, since the parent
+    // can never wait for it
+
+    // Find and delete the child's entry in the hashmap
+    struct process_status process_to_find;
+    process_to_find.tid = tid;
+
+    lock_acquire(&user_processes_lock);
+    struct hash_elem *child_process_elem = hash_delete(
+      &user_processes,
+      &process_to_find.elem
+    );
+    lock_release(&user_processes_lock);
+
+    // Free the child's entry struct
+    struct process_status *child_process_entry = hash_entry(
+      child_process_elem,
+      struct process_status,
+      elem
+    );
+    free(child_process_entry);
+
+    return TID_ERROR;
+  }
+
+  new_child_tid_struct->tid = tid;
 
   // Add the child tid elem to the current parent process's child_tids list.
-  list_push_back(&thread_current()->child_tids, &new_child_tid->elem);
+  list_push_back(&thread_current()->child_tids, &new_child_tid_struct->elem);
 
   return tid;
 }
