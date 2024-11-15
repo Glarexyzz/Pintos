@@ -5,6 +5,9 @@
 #include "threads/thread.h"
 #include <hash.h>
 
+/// The exit code for a process which errors
+#define ERROR_STATUS_CODE -1
+
 /// Used as an entry in the `user_processes` hashmap.
 struct process_status {
   tid_t tid;             // The tid of the process

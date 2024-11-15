@@ -14,9 +14,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
+#define SYSCALL_ERROR_CODE -1
+#define STDIN_FD 0
+#define STDOUT_FD 1
 
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
 #define AN_ARG(type, name, number)                           \
@@ -24,15 +26,12 @@
   type name;                                                 \
   void *start ## number ## _kernel = (void *) &name;         \
   /* copy argument, which may be on separate pages */        \
-  if (!buffer_pages_foreach(                                 \
+  exit_if_false (memory_pages_foreach(                       \
     arg ## number ## _,                                      \
     sizeof(type),                                            \
-    &buffer_page_copy,                                       \
+    &page_copy,                                              \
     (void *) &start ## number ## _kernel                     \
-  )) {                                                       \
-    exit_user_process(-1);                                   \
-    NOT_REACHED();                                           \
-  }
+  ));
 
 /**
  * Get one argument from the interrupt frame.
@@ -54,7 +53,7 @@
   AN_ARG(t1, n1, 1)
 
 /**
- * Get one argument from the interrupt frame.
+ * Get two arguments from the interrupt frame.
  * @param t1 The type of the first argument.
  * @param n1 The name of the first argument.
  * @param t2 The type of the second argument.
@@ -79,7 +78,7 @@
   AN_ARG(t2, n2, 2)
 
 /**
- * Get one argument from the interrupt frame.
+ * Get three arguments from the interrupt frame.
  * @param t1 The type of the first argument.
  * @param n1 The name of the first argument.
  * @param t2 The type of the second argument.
@@ -112,45 +111,40 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
 
 /**
  * Type of auxiliary functions to handle memory held in pages mapped by a given
- * user's buffer.
+ * user's buffer at a specified memory range.
  * Takes a pointer to the kernel address to a given (part or whole) page,
  * the size of memory in that page, and a helper state.
  */
-typedef void (*block_foreach_func) (void *, unsigned, void *);
+typedef void (*page_foreach_func) (void *, unsigned, void *);
 
-static bool buffer_pages_foreach(
-  void *user_buffer,
+/// State struct to be used by the buffer page iterator, storing the file being
+/// read, the total number of bytes read, and whether EOF has been reached.
+struct file_read_state {
+  struct file *file;
+  unsigned bytes_read;
+  bool eof_reached;
+};
+
+static void exit_if_false(bool cond);
+
+static bool memory_pages_foreach(
+  void *user_address,
   unsigned size,
-  block_foreach_func f,
+  page_foreach_func f,
   void *state
 );
 
-static void *access_user_memory(uint32_t *pd, const void *uaddr);
+static void *get_kernel_address(const void *uaddr);
+static struct fd_entry *get_fd_entry(int fd);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
-// Helper functions for reading to and writing from buffer pages.
+// Helper functions for reading to and writing from sections of pages.
 
-static void buffer_page_copy(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state
-);
-static void buffer_page_print(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-);
-static void buffer_page_record_stdin(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-);
-static void buffer_page_file_read(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state_
-);
+static void page_copy(void *page, unsigned size, void *state);
+static void page_print(void *page, unsigned size, void *state UNUSED);
+static void page_console_read(void *page_, unsigned size, void *state UNUSED);
+static void page_file_read(void *page, unsigned size, void *state_);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
@@ -200,6 +194,80 @@ syscall_init (void)
 }
 
 /**
+ * Exit the user process with an error status if the condition is false.
+ * @param cond The condition to check.
+ * @remark Will not return if the condition is false.
+ */
+static inline void exit_if_false(bool cond) {
+  if (!cond) {
+    exit_user_process(ERROR_STATUS_CODE);
+    NOT_REACHED();
+  }
+}
+
+/**
+ * Iterator for all parts of pages mapped by memory of a given length (e.g.
+ * an array).
+ * Applies the foreach function to each section of a page with the size of
+ * the section of memory held in that page, and the state.
+ * Fails, returning false, if the range does not map to a block of memory
+ * owned by the current process.
+ * Care must be taken to ensure that the foreach function does not attempt to
+ * write to read-only data, if the provided memory range is also read-only.
+ * @param user_address The virtual (user) address to the start of the range.
+ * @param size The size of the memory range provided by the user.
+ * @param f Iterator function to handle a part of the memory range in one page.
+ * @param state State for the helper function to use.
+ * @return `true` if and only if accessing the entire memory range succeeded.
+ */
+static bool memory_pages_foreach(
+  void *user_address,
+  unsigned size,
+  page_foreach_func f,
+  void *state
+) {
+  void *buffer = get_kernel_address(user_address);
+  if (!user_owns_memory_range(user_address, size)) {
+    return false;
+  }
+  ASSERT(buffer != NULL);
+  // The trivial case, when the entire buffer fits inside the page.
+  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
+  if (buffer_end_offset < PGSIZE) {
+    (*f)(buffer, size, state);
+    return true;
+  }
+
+  // Otherwise, we have the start of the buffer reaching the end of a page,
+  // an optional number of full pages in the middle of the buffer,
+  // and the end of the buffer possibly ending at a different page.
+
+  // The size occupied in the first page by the buffer.
+  unsigned buffer_start_page_size = 0;
+  if (pg_ofs(user_address) != 0) {
+    // Read the first page
+    buffer_start_page_size = PGSIZE - pg_ofs(user_address);
+    (*f)(buffer, buffer_start_page_size, state);
+    // Progress to the end of the page
+    user_address += buffer_start_page_size;
+    size -= buffer_start_page_size;
+  }
+  // Read all the full pages in the middle of the buffer, plus the
+  // page at the end.
+  while (size > 0) {
+    ASSERT(pg_ofs(user_address) == 0);
+    buffer = get_kernel_address(user_address);
+    ASSERT(buffer != NULL);
+    unsigned consumed = size < PGSIZE ? size : PGSIZE;
+    (*f)(buffer, consumed, state);
+    // If the last page is reached, consumed == size.
+    user_address += consumed;
+    size -= consumed;
+  }
+  return true;
+}
+
+/**
  * Get the kernel virtual address of a virtual user address from the page
  * directory provided.
  * @param pd The page directory from which to read.
@@ -208,38 +276,135 @@ syscall_init (void)
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
  * @remark If NULL is returned, the caller should free its resources and call
- * exit_user_process(-1).
+ * exit_user_process(ERROR_STATUS_CODE).
  */
-static void *access_user_memory(uint32_t *pd, const void *uaddr) {
+static void *get_kernel_address(const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
   if (!is_user_vaddr(uaddr)) {
     return NULL;
   }
 
-  return pagedir_get_page(pd, uaddr);
+  return pagedir_get_page(thread_current()->pagedir, uaddr);
 }
 
 /**
- * Takes a pointer to a memory address, and copies buffer_page_size bytes from
+ * Fetches an FD entry from the current thread's FD table.
+ * @param fd The FD number.
+ * @return A pointer to the FD entry, or NULL if there is no entry for the FD
+ * number.
+ */
+static struct fd_entry *get_fd_entry(int fd) {
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+
+  if (fd_found_elem == NULL) return NULL;
+
+  return hash_entry(fd_found_elem, struct fd_entry, elem);
+}
+
+/**
+ * Checks whether the user owns a given block of memory of a given size, that
+ * starts at a given (virtual) address.
+ * @param buffer The virtual address to the buffer.
+ * @param size The length of the buffer that would be read from or written to.
+ * @return `true` if and only if all parts of the buffer are owned by the user.
+ */
+static bool user_owns_memory_range(const void *buffer, unsigned size) {
+  // Performing pointer arithmetic on a void* is undefined behaviour,
+  // so cast to a uint8_t* to comply with the standard.
+  for (unsigned i = 0; i < size; i += PGSIZE) {
+    if (get_kernel_address(&((uint8_t *)buffer)[i]) == NULL) {
+      return false;
+    }
+  }
+  // Check the end of the buffer as well.
+  if (get_kernel_address(&((uint8_t *)buffer)[size - 1]) == NULL) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Takes a pointer to a memory address, and copies `size` bytes from `page` to
  * the beginning of the address stored at `state`, also incrementing the
- * address by `buffer_page_size` bytes.
- * @param buffer_page_
- * @param buffer_page_size
+ * address by `size` bytes.
+ * @param page The physical address at the start of the the portion of the page
+ * @param size The size of the portion of the page
  * @param state The address (of type `uint8_t **`) to the value being copied
  * (and incremented).
  */
-static void buffer_page_copy(
-    void *buffer_page,
-    unsigned buffer_page_size,
-    void *state
-) {
+static void page_copy(void *page, unsigned size, void *state) {
   uint8_t **start = (uint8_t **)state;
-  memcpy(
-    (void *)*start,
-    (const void *)buffer_page,
-    (unsigned long)buffer_page_size
-  );
-  *start += buffer_page_size;
+  ASSERT(start != NULL && *start != NULL);
+  memcpy((void *)*start, (const void *)page, (unsigned long)size);
+  *start += size;
+}
+
+/**
+ * Prints a given part of the page from a buffer to the console.
+ * The function does not provide synchronisation for console writes on its own.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void page_print(void *page, unsigned size, void *state UNUSED) {
+  unsigned bytes_written;
+  const void *page_part = (const void *)page;
+  // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
+  // this part of the buffer occupies in memory
+  for (
+    bytes_written = 0;
+    bytes_written + MAX_WRITE_SIZE < size;
+    bytes_written += MAX_WRITE_SIZE
+  ) {
+    putbuf(page_part + bytes_written, MAX_WRITE_SIZE);
+  }
+  // Write the remaining bytes in the page
+  putbuf(page_part + bytes_written, size - bytes_written);
+}
+
+/**
+ * Reads input from the console, writing it to the given page of the buffer.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for console reads on its own.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
+  uint8_t *page_part = (uint8_t *)page_;
+  for (unsigned i = 0; i < size; i++) {
+    page_part[i] = input_getc();
+  }
+}
+
+/**
+ * Helper function for reading from a file, and writing it to the given page
+ * of the buffer. Will do nothing once an EOF has been reached.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for file reads on its own.
+ * @param page The portion of the page in part of the buffer, to be written to.
+ * @param size The size of the portion of the page
+ * @param state_ A pointer to a `struct file_read_state`
+ * @see struct file_read_state
+ */
+static void page_file_read(void *page, unsigned size, void *state_) {
+  struct file_read_state *state = (struct file_read_state *)state_;
+  if (state->eof_reached) return;
+  unsigned bytes_read = file_read(state->file, page, size);
+  if (bytes_read < size) {
+    // The buffer has not been fully written to, indicating we are at the
+    // end of the file.
+    state->eof_reached = true;
+  } else {
+    state->bytes_read += bytes_read;
+  }
 }
 
 /**
@@ -277,16 +442,8 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  char *physical_cmd_line = access_user_memory(
-    thread_current()->pagedir,
-    cmd_line
-  );
-
-  // Terminate process if pointer is invalid.
-  if (physical_cmd_line == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  char *physical_cmd_line = get_kernel_address(cmd_line);
+  exit_if_false(physical_cmd_line != NULL);
 
   f->eax = process_execute(physical_cmd_line);
 }
@@ -312,18 +469,8 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  //Access memory
-  const char *physical_filename = access_user_memory(
-      thread_current()->pagedir,
-      user_filename
-  );
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  const char *physical_filename = get_kernel_address(user_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_create(physical_filename, initial_size);
@@ -340,18 +487,8 @@ static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
-  //Access memory
-  const char *physical_filename = access_user_memory(
-      thread_current()->pagedir,
-      user_filename
-  );
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  const char *physical_filename = get_kernel_address(user_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_remove(physical_filename);
@@ -369,24 +506,16 @@ static void open(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   struct thread *cur_thread = thread_current();
-  const char *physical_filename = access_user_memory(
-    cur_thread->pagedir,
-    user_filename
-  );
 
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    return;
-  }
+  const char *physical_filename = get_kernel_address(user_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   struct file *new_file = filesys_open(physical_filename);
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
-    f->eax = -1;
+    f->eax = SYSCALL_ERROR_CODE;
     return;
   }
 
@@ -394,7 +523,7 @@ static void open(struct intr_frame *f) {
   struct fd_entry *new_fd_entry =
     malloc(sizeof(struct fd_entry));
   if (new_fd_entry == NULL) {
-    f->eax = -1;
+    f->eax = SYSCALL_ERROR_CODE;
     return;
   }
 
@@ -415,165 +544,15 @@ static void filesize(struct intr_frame *f) {
   // int filesize(int fd)
   ONE_ARG(int, fd);
 
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-
-  // Search up the fd-file mapping from the fd table.
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
-  int size = file_length(fd_found->file);
+  int size = file_length(entry->file);
   lock_release(&file_system_lock);
 
   f->eax = size;
-}
-
-/**
- * Checks whether the user owns a given block of memory of a given size, that
- * starts at a given (virtual) address.
- * @param buffer The virtual address to the buffer.
- * @param size The length of the buffer that would be read from
- * or written to.
- * @return `true` if and only if all parts of the buffer are owned by the user.
- */
-static bool user_owns_memory_range(const void *buffer, unsigned size) {
-  uint32_t *pd = thread_current()->pagedir;
-  // Performing pointer arithmetic on a void* is undefined behaviour,
-  // so cast to a uint8_t* to comply with the standard.
-  for (unsigned i = 0; i < size; i += PGSIZE) {
-    if (access_user_memory(pd, &((uint8_t *)buffer)[i]) == NULL) {
-      return false;
-    }
-  }
-  // Check the end of the buffer as well.
-  if (access_user_memory(pd, &((uint8_t *)buffer)[size - 1]) == NULL) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Iterates over all pages to read mapped by the buffer of given size,
- * applying the foreach function to each page with the size of the section of
- * buffer in that page, and the state.
- * Fails, returning false, if the buffer does not map to a block of memory
- * owned by the user.
- * Care must be taken to ensure that the foreach function does not attempt to
- * write to read-only data, if the provided `user_buffer` is also read-only.
- * @param user_buffer The virtual (user) address to the buffer.
- * @param size The size of the buffer provided by the user.
- * @param f Iterator function to handle a part of the buffer in one page.
- * @param state State for the helper function to use.
- * @return `true` if and only if accessing the entire buffer succeeded.
- */
-static bool buffer_pages_foreach(
-  void *user_buffer,
-  unsigned size,
-  block_foreach_func f,
-  void *state
-) {
-  uint32_t *pd = thread_current()->pagedir;
-  void *buffer = access_user_memory(pd, user_buffer);
-  if (!user_owns_memory_range(user_buffer, size)) {
-    return false;
-  }
-  ASSERT(buffer != NULL);
-  // The trivial case, when the entire buffer fits inside the page.
-  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
-  if (buffer_end_offset < PGSIZE) {
-    (*f)(buffer, size, state);
-    return true;
-  }
-
-  // Otherwise, we have the start of the buffer reaching the end of a page,
-  // an optional number of full pages in the middle of the buffer,
-  // and the end of the buffer possibly ending at a different page.
-
-  // The size occupied in the first page by the buffer.
-  unsigned buffer_start_page_size = 0;
-  if (pg_ofs(user_buffer) != 0) {
-    // Read the first page
-    buffer_start_page_size = PGSIZE - pg_ofs(user_buffer);
-    (*f)(buffer, buffer_start_page_size, state);
-    // Progress to the end of the page
-    user_buffer += buffer_start_page_size;
-    size -= buffer_start_page_size;
-  }
-  // Read all the full pages in the middle of the buffer, plus the
-  // page at the end.
-  while (size > 0) {
-    ASSERT(pg_ofs(user_buffer) == 0);
-    buffer = access_user_memory(pd, user_buffer);
-    ASSERT(buffer != NULL);
-    unsigned consumed = size < PGSIZE ? size : PGSIZE;
-    (*f)(buffer, consumed, state);
-    // If the last page is reached, consumed == size.
-    user_buffer += consumed;
-    size -= consumed;
-  }
-  return true;
-}
-
-/**
- * Reads input from the console, writing it to the given page of the buffer.
- * The original buffer should not point to a read-only section of memory.
- * The function does not provide synchronisation for console reads on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
-static void buffer_page_record_stdin(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-) {
-  uint8_t *buffer_page = (uint8_t *)buffer_page_;
-  for (unsigned i = 0; i < buffer_page_size; i++) {
-    buffer_page[i] = input_getc();
-  }
-}
-
-/// State struct to be used by the buffer page iterator, storing the file being
-/// read, the total number of bytes read, and whether EOF has been reached.
-struct file_read_state {
-  struct file *file;
-  unsigned bytes_read;
-  bool eof_reached;
-};
-
-/**
- * Helper function for reading from a file, and writing it to the given page
- * of the buffer. Will do nothing once an EOF has been reached.
- * The original buffer should not point to a read-only section of memory.
- * The function does not provide synchronisation for file reads on its own.
- * @param buffer_page
- * @param buffer_page_size
- * @param state_ A pointer to a `struct file_read_state`
- * @see struct file_read_state
- */
-static void buffer_page_file_read(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state_
-) {
-  struct file_read_state *state = (struct file_read_state *)state_;
-  if (state->eof_reached) return;
-  unsigned bytes_read = file_read(state->file, buffer_page, buffer_page_size);
-  if (bytes_read < buffer_page_size) {
-    // The buffer has not been fully written to, indicating we are at the
-    // end of the file.
-    state->eof_reached = true;
-  } else {
-    state->bytes_read += bytes_read;
-  }
 }
 
 /**
@@ -590,89 +569,38 @@ static void read(struct intr_frame *f) {
 
   int bytes_read;
 
-  if (fd == 0) {
+  if (fd == STDIN_FD) {
     // Read from the console.
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(
-      buffer,
-      size,
-      &buffer_page_record_stdin,
-      NULL
-    );
+    bool success = memory_pages_foreach(buffer, size, &page_console_read, NULL);
     lock_release(&console_lock);
-    if (!success) {
-      exit_user_process(-1);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
     // Given the original memory is valid, we will record all `size` bytes
     // from stdin.
     bytes_read = size;
   } else {
     // Read from file.
 
-    // Search up the fd-file mapping from the fd table.
-  	struct fd_entry fd_to_find;
-  	fd_to_find.fd = fd;
-
-  	struct hash_elem *fd_found_elem = hash_find(
-  	  &thread_current()->fd_table,
-  	  &fd_to_find.elem
-  	);
-  	if (fd_found_elem == NULL) {
-      f->eax = -1;
+    struct fd_entry *entry = get_fd_entry(fd);
+    if (entry == NULL) {
+      f->eax = SYSCALL_ERROR_CODE;
       return;
-  	}
-  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+    }
 
     // Initialise the current state of reading the file to the buffer.
     struct file_read_state state;
-    state.file = fd_found->file;
+    state.file = entry->file;
     state.eof_reached = false;
     state.bytes_read = 0;
 
     lock_acquire(&file_system_lock);
-    bool success = buffer_pages_foreach(
-      buffer,
-      size,
-      &buffer_page_file_read,
-      &state
-    );
+    bool success = memory_pages_foreach(buffer, size, &page_file_read, &state);
     lock_release(&file_system_lock);
-    if (!success) {
-      exit_user_process(-1);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
 
     bytes_read = state.bytes_read;
   }
   f->eax = bytes_read;
-}
-
-/**
- * Prints a given page of the buffer to the console.
- * The function does not provide synchronisation for console writes on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
-static void buffer_page_print(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-) {
-  unsigned bytes_written;
-  const void *buffer_page = (const void *)buffer_page_;
-  // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
-  // this part of the buffer occupies in memory
-  for (
-    bytes_written = 0;
-    bytes_written + MAX_WRITE_SIZE < buffer_page_size;
-    bytes_written += MAX_WRITE_SIZE
-  ) {
-    putbuf(buffer_page + bytes_written, MAX_WRITE_SIZE);
-  }
-  // Write the remaining bytes in the page
-  putbuf(buffer_page + bytes_written, buffer_page_size - bytes_written);
 }
 
 /**
@@ -687,59 +615,39 @@ static void write(struct intr_frame *f) {
     unsigned, size
   );
 
-  const char *buffer = access_user_memory(
-    thread_current()->pagedir,
-    user_buffer
-  );
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (buffer == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  const char *buffer = get_kernel_address(user_buffer);
+  exit_if_false(buffer != NULL);
 
   // If we don't own the buffer's memory, the operation is invalid.
   if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(-1);
+    exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
   }
 
-  if (fd == 1) {
+  if (fd == STDOUT_FD) {
     // Console write
 
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(
-      user_buffer,
+    bool success = memory_pages_foreach(
+      (void *)user_buffer,
       size,
-      &buffer_page_print,
+      &page_print,
       NULL
     );
     lock_release(&console_lock);
-    if (!success) {
-      exit_user_process(-1);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
     // Given the original memory is valid, putbuf will succeed
     // so all bytes will have been written.
     f->eax = size;
   } else {
     // Write to file
 
-    // Search up the fd-file mapping from the fd table.
-  	struct fd_entry fd_to_find;
-  	fd_to_find.fd = fd;
-  	struct hash_elem *fd_found_elem = hash_find(
-  	  &thread_current()->fd_table,
-  	  &fd_to_find.elem
-  	);
-  	if (fd_found_elem == NULL) {
-  	  exit_user_process(-1);
-  	  NOT_REACHED();
-  	}
-  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+    // Get the FD entry, error if there is none
+    struct fd_entry *entry = get_fd_entry(fd);
+    exit_if_false(entry != NULL);
 
     lock_acquire(&file_system_lock);
-    int bytes_written = file_write(fd_found->file, buffer, size);
+    int bytes_written = file_write(entry->file, buffer, size);
     lock_release(&file_system_lock);
 
     f->eax = bytes_written;
@@ -757,21 +665,12 @@ static void seek(struct intr_frame *f) {
     unsigned, position
   );
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
-  file_seek(fd_found->file, position);
+  file_seek(entry->file, position);
   lock_release(&file_system_lock);
 }
 
@@ -783,21 +682,12 @@ static void tell(struct intr_frame *f) {
   // unsigned tell(int fd)
   ONE_ARG(int, fd);
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
-  unsigned position = file_tell(fd_found->file);
+  unsigned position = file_tell(entry->file);
   lock_release(&file_system_lock);
 
   f->eax = position;
@@ -811,21 +701,13 @@ static void close(struct intr_frame *f UNUSED) {
   // void close(int fd)
   ONE_ARG(int, fd);
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_false(entry != NULL);
 
   // close file, free it, delete from fd_table.
-  hash_delete(&thread_current()->fd_table, fd_found_elem);
-  close_file(fd_found_elem, NULL);
+  hash_delete(&thread_current()->fd_table, &entry->elem);
+  close_file(&entry->elem, NULL);
 }
 
 /**
@@ -837,24 +719,13 @@ syscall_handler (struct intr_frame *f)
 {
   uint32_t *syscall_no_addr = f->esp;
 
-  uint32_t *physical_syscall_no_addr = access_user_memory(
-    thread_current()->pagedir,
-    syscall_no_addr
-  );
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_syscall_no_addr == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
+  exit_if_false(physical_syscall_no_addr != NULL);
 
   uint32_t syscall_no = *physical_syscall_no_addr;
 
-  if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_false(syscall_no <
+                sizeof(syscall_handlers) / sizeof(syscall_handler_func));
 
   (*syscall_handlers[syscall_no])(f);
 }

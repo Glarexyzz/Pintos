@@ -41,10 +41,7 @@ static bool user_process_tid_smaller(
 );
 void user_process_hashmap_init(void);
 
-static unsigned fd_hash(
-  const struct hash_elem *element,
-  void *aux UNUSED
-);
+static unsigned fd_hash(const struct hash_elem *element, void *aux UNUSED);
 static bool fd_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
@@ -353,10 +350,7 @@ process_execute (const char *file_name)
  * @param aux Unused.
  * @return The hash of the fd_table.
  */
-static unsigned fd_hash(
-  const struct hash_elem *element,
-  void *aux UNUSED
-) {
+static unsigned fd_hash(const struct hash_elem *element, void *aux UNUSED) {
   int fd = hash_entry(element, struct fd_entry, elem)->fd;
   return hash_int(fd);
 }
@@ -410,8 +404,7 @@ start_process (void *aux_)
   // Initialise the file descriptor table.
   success = hash_init(&thread_current()->fd_table, fd_hash, fd_smaller, NULL);
   if (!success) goto startup_failure;
-  thread_current()->fd_counter = 2; /* Can't use the numbers 0 or 1 -
-                                       these refer to the console. */
+  thread_current()->fd_counter = 2; /* 0: stdin; 1:stdout */
 
   // Start-up successful
 
@@ -453,13 +446,11 @@ start_process (void *aux_)
 
 /* Waits for thread TID to die and returns its exit status. 
  * If it was terminated by the kernel (i.e. killed due to an exception), 
- * returns -1.  
+ * returns ERROR_STATUS_CODE.
  * If TID is invalid or if it was not a child of the calling process, or if 
  * process_wait() has already been successfully called for the given TID, 
- * returns -1 immediately, without waiting.
- * 
- * This function will be implemented in task 2.
- * For now, it does nothing. */
+ * returns ERROR_STATUS_CODE immediately, without waiting.
+ */
 int
 process_wait (tid_t child_tid)
 {
@@ -480,8 +471,7 @@ process_wait (tid_t child_tid)
       struct process_tid,
       elem
     );
-    // If the child's tid matches the tid the caller wants to wait, the wait is
-    // valid
+    // the wait is valid when the child's tid matches the called tid
     if (child_tid_struct->tid == child_tid) {
       is_child = true;
       break;
@@ -489,7 +479,7 @@ process_wait (tid_t child_tid)
   }
 
   // If the provided tid was not in the caller's list of children, return
-  if (!is_child) return -1;
+  if (!is_child) return ERROR_STATUS_CODE;
 
   // Remove the thread we're waiting for from the list of children, since we can
   // only wait for a child process once
@@ -505,12 +495,10 @@ process_wait (tid_t child_tid)
   process_to_find.tid = child_tid;
 
   lock_acquire(&user_processes_lock);
-
   struct hash_elem *process_found_elem = hash_find(
     &user_processes,
     &process_to_find.elem
   );
-
   lock_release(&user_processes_lock);
 
   // The process is guaranteed to be in the hashmap, since it's only removed by
@@ -559,7 +547,6 @@ void close_file(struct hash_elem *element, void *aux UNUSED) {
  * @param status The exit status code.
  */
 void exit_user_process(int status) {
-
   struct thread *cur_thread = thread_current();
 
   // When a process exits, we must update its exit status in the user_processes
