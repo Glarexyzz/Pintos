@@ -19,14 +19,14 @@
 #define MAX_WRITE_SIZE 300
 
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
-#define AN_ARG(t1, n1, number)                               \
+#define AN_ARG(type, name, number)                           \
   void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
-  t1 n1;                                                     \
-  void *start ## number ## _kernel = (void *) &n1;           \
+  type name;                                                 \
+  void *start ## number ## _kernel = (void *) &name;         \
   /* copy argument, which may be on separate pages */        \
   if (!buffer_pages_foreach(                                 \
     arg ## number ## _,                                      \
-    sizeof(t1),                                              \
+    sizeof(type),                                            \
     &buffer_page_copy,                                       \
     (void *) &start ## number ## _kernel                     \
   )) {                                                       \
