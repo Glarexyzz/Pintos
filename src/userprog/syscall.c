@@ -125,6 +125,13 @@ struct file_read_state {
   bool eof_reached;
 };
 
+/// State struct to be used by the buffer page iterator, storing the file being
+/// written to, and the total number of bytes written.
+struct file_write_state {
+  struct file *file;
+  unsigned bytes_written;
+};
+
 static void exit_if_false(bool cond);
 
 static bool memory_pages_foreach(
@@ -145,6 +152,7 @@ static void page_copy(void *page, unsigned size, void *state);
 static void page_print(void *page, unsigned size, void *state UNUSED);
 static void page_console_read(void *page_, unsigned size, void *state UNUSED);
 static void page_file_read(void *page, unsigned size, void *state_);
+static void page_file_write(void *page, unsigned size, void *state_);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
@@ -402,9 +410,21 @@ static void page_file_read(void *page, unsigned size, void *state_) {
     // The buffer has not been fully written to, indicating we are at the
     // end of the file.
     state->eof_reached = true;
-  } else {
-    state->bytes_read += bytes_read;
   }
+  state->bytes_read += bytes_read;
+}
+
+/**
+ * Helper function for writing to a file, from a given page of the buffer.
+ * The function does not provide synchronisation for file reads on its own.
+ * @param page The portion of the page in part of the buffer, to be read from.
+ * @param size The size of the portion of the page
+ * @param state_ A pointer to a `struct file_write_state`
+ * @see struct file_write_state
+ */
+static void page_file_write(void *page, unsigned size, void *state_) {
+  struct file_write_state *state = (struct file_write_state *)state_;
+  state->bytes_written += (unsigned)file_write(state->file, page, size);
 }
 
 /**
@@ -442,10 +462,10 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  char *physical_cmd_line = get_kernel_address(cmd_line);
-  exit_if_false(physical_cmd_line != NULL);
+  char *kernel_cmd_line = get_kernel_address(cmd_line);
+  exit_if_false(kernel_cmd_line != NULL);
 
-  f->eax = process_execute(physical_cmd_line);
+  f->eax = process_execute(kernel_cmd_line);
 }
 
 /**
@@ -469,11 +489,11 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_create(physical_filename, initial_size);
+  bool success = filesys_create(kernel_filename, initial_size);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -487,11 +507,11 @@ static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_remove(physical_filename);
+  bool success = filesys_remove(kernel_filename);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -507,11 +527,11 @@ static void open(struct intr_frame *f) {
 
   struct thread *cur_thread = thread_current();
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  struct file *new_file = filesys_open(physical_filename);
+  struct file *new_file = filesys_open(kernel_filename);
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
@@ -611,25 +631,16 @@ static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
   THREE_ARG(
     int, fd,
-    const void *, user_buffer,
+    const void *, buffer,
     unsigned, size
   );
-
-  const char *buffer = get_kernel_address(user_buffer);
-  exit_if_false(buffer != NULL);
-
-  // If we don't own the buffer's memory, the operation is invalid.
-  if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(ERROR_STATUS_CODE);
-    NOT_REACHED();
-  }
 
   if (fd == STDOUT_FD) {
     // Console write
 
     lock_acquire(&console_lock);
     bool success = memory_pages_foreach(
-      (void *)user_buffer,
+      (void *)buffer,
       size,
       &page_print,
       NULL
@@ -646,11 +657,24 @@ static void write(struct intr_frame *f) {
     struct fd_entry *entry = get_fd_entry(fd);
     exit_if_false(entry != NULL);
 
-    lock_acquire(&file_system_lock);
-    int bytes_written = file_write(entry->file, buffer, size);
-    lock_release(&file_system_lock);
+    // Initialise the current state of writing to the file from the buffer.
+    struct file_write_state state;
+    state.file = entry->file;
+    state.bytes_written = 0;
 
-    f->eax = bytes_written;
+    lock_acquire(&file_system_lock);
+    // The iterator will check the user-provided buffer.
+    // If it is invalid, no copying will take place.
+    bool success = memory_pages_foreach(
+      (void *)buffer,
+      size,
+      &page_file_write,
+      &state
+    );
+    lock_release(&file_system_lock);
+    exit_if_false(success);
+
+    f->eax = state.bytes_written;
   }
 }
 
@@ -719,10 +743,10 @@ syscall_handler (struct intr_frame *f)
 {
   uint32_t *syscall_no_addr = f->esp;
 
-  uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
-  exit_if_false(physical_syscall_no_addr != NULL);
+  uint32_t *kernel_syscall_no_addr = get_kernel_address(syscall_no_addr);
+  exit_if_false(kernel_syscall_no_addr != NULL);
 
-  uint32_t syscall_no = *physical_syscall_no_addr;
+  uint32_t syscall_no = *kernel_syscall_no_addr;
 
   exit_if_false(syscall_no <
                 sizeof(syscall_handlers) / sizeof(syscall_handler_func));
