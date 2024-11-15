@@ -28,7 +28,7 @@
   type name;                                                 \
   void *start ## number ## _kernel = (void *) &name;         \
   /* copy argument, which may be on separate pages */        \
-  if (!buffer_pages_foreach(                                 \
+  if (!memory_pages_foreach(                                 \
     arg ## number ## _,                                      \
     sizeof(type),                                            \
     &page_copy,                                              \
@@ -124,8 +124,8 @@ typedef void (*page_foreach_func) (void *, unsigned, void *);
 
 static void exit_if_null(const void *ptr);
 
-static bool buffer_pages_foreach(
-  void *user_buffer,
+static bool memory_pages_foreach(
+  void *user_address,
   unsigned size,
   page_foreach_func f,
   void *state
@@ -136,7 +136,7 @@ static struct fd_entry *get_fd_entry(int fd);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
-// Helper functions for reading to and writing from buffer pages.
+// Helper functions for reading to and writing from sections of pages.
 
 static void page_copy(void *page, unsigned size, void *state);
 static void page_print(void *page, unsigned size, void *state UNUSED);
@@ -430,27 +430,28 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
 }
 
 /**
- * Iterates over all pages to read mapped by the buffer of given size,
- * applying the foreach function to each page with the size of the section of
- * buffer in that page, and the state.
- * Fails, returning false, if the buffer does not map to a block of memory
- * owned by the user.
+ * Iterator for all parts of pages mapped by memory of a given length (e.g.
+ * an array).
+ * Applies the foreach function to each section of a page with the size of
+ * the section of memory held in that page, and the state.
+ * Fails, returning false, if the range does not map to a block of memory
+ * owned by the current process.
  * Care must be taken to ensure that the foreach function does not attempt to
- * write to read-only data, if the provided `user_buffer` is also read-only.
- * @param user_buffer The virtual (user) address to the buffer.
- * @param size The size of the buffer provided by the user.
- * @param f Iterator function to handle a part of the buffer in one page.
+ * write to read-only data, if the provided memory range is also read-only.
+ * @param user_address The virtual (user) address to the start of the range.
+ * @param size The size of the memory range provided by the user.
+ * @param f Iterator function to handle a part of the memory range in one page.
  * @param state State for the helper function to use.
- * @return `true` if and only if accessing the entire buffer succeeded.
+ * @return `true` if and only if accessing the entire memory range succeeded.
  */
-static bool buffer_pages_foreach(
-  void *user_buffer,
+static bool memory_pages_foreach(
+  void *user_address,
   unsigned size,
   page_foreach_func f,
   void *state
 ) {
-  void *buffer = get_kernel_address(user_buffer);
-  if (!user_owns_memory_range(user_buffer, size)) {
+  void *buffer = get_kernel_address(user_address);
+  if (!user_owns_memory_range(user_address, size)) {
     return false;
   }
   ASSERT(buffer != NULL);
@@ -467,24 +468,24 @@ static bool buffer_pages_foreach(
 
   // The size occupied in the first page by the buffer.
   unsigned buffer_start_page_size = 0;
-  if (pg_ofs(user_buffer) != 0) {
+  if (pg_ofs(user_address) != 0) {
     // Read the first page
-    buffer_start_page_size = PGSIZE - pg_ofs(user_buffer);
+    buffer_start_page_size = PGSIZE - pg_ofs(user_address);
     (*f)(buffer, buffer_start_page_size, state);
     // Progress to the end of the page
-    user_buffer += buffer_start_page_size;
+    user_address += buffer_start_page_size;
     size -= buffer_start_page_size;
   }
   // Read all the full pages in the middle of the buffer, plus the
   // page at the end.
   while (size > 0) {
-    ASSERT(pg_ofs(user_buffer) == 0);
-    buffer = get_kernel_address(user_buffer);
+    ASSERT(pg_ofs(user_address) == 0);
+    buffer = get_kernel_address(user_address);
     ASSERT(buffer != NULL);
     unsigned consumed = size < PGSIZE ? size : PGSIZE;
     (*f)(buffer, consumed, state);
     // If the last page is reached, consumed == size.
-    user_buffer += consumed;
+    user_address += consumed;
     size -= consumed;
   }
   return true;
@@ -553,7 +554,7 @@ static void read(struct intr_frame *f) {
   if (fd == STDIN_FD) {
     // Read from the console.
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(buffer, size, &page_console_read, NULL);
+    bool success = memory_pages_foreach(buffer, size, &page_console_read, NULL);
     lock_release(&console_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
@@ -578,7 +579,7 @@ static void read(struct intr_frame *f) {
     state.bytes_read = 0;
 
     lock_acquire(&file_system_lock);
-    bool success = buffer_pages_foreach(buffer, size, &page_file_read, &state);
+    bool success = memory_pages_foreach(buffer, size, &page_file_read, &state);
     lock_release(&file_system_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
@@ -638,7 +639,12 @@ static void write(struct intr_frame *f) {
     // Console write
 
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(user_buffer, size, &page_print, NULL);
+    bool success = memory_pages_foreach(
+      (void *)user_buffer,
+      size,
+      &page_print,
+      NULL
+    );
     lock_release(&console_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
