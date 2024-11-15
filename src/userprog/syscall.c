@@ -14,10 +14,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
-
 #define SYSCALL_ERROR_CODE -1
 #define STDIN_FD 0
 #define STDOUT_FD 1
@@ -58,7 +56,7 @@
   AN_ARG(t1, n1, 1)
 
 /**
- * Get one argument from the interrupt frame.
+ * Get two arguments from the interrupt frame.
  * @param t1 The type of the first argument.
  * @param n1 The name of the first argument.
  * @param t2 The type of the second argument.
@@ -83,7 +81,7 @@
   AN_ARG(t2, n2, 2)
 
 /**
- * Get one argument from the interrupt frame.
+ * Get three arguments from the interrupt frame.
  * @param t1 The type of the first argument.
  * @param n1 The name of the first argument.
  * @param t2 The type of the second argument.
@@ -121,6 +119,14 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
  * the size of memory in that page, and a helper state.
  */
 typedef void (*page_foreach_func) (void *, unsigned, void *);
+
+/// State struct to be used by the buffer page iterator, storing the file being
+/// read, the total number of bytes read, and whether EOF has been reached.
+struct file_read_state {
+  struct file *file;
+  unsigned bytes_read;
+  bool eof_reached;
+};
 
 static void exit_if_null(const void *ptr);
 
@@ -203,6 +209,68 @@ static inline void exit_if_null(const void *ptr) {
 }
 
 /**
+ * Iterator for all parts of pages mapped by memory of a given length (e.g.
+ * an array).
+ * Applies the foreach function to each section of a page with the size of
+ * the section of memory held in that page, and the state.
+ * Fails, returning false, if the range does not map to a block of memory
+ * owned by the current process.
+ * Care must be taken to ensure that the foreach function does not attempt to
+ * write to read-only data, if the provided memory range is also read-only.
+ * @param user_address The virtual (user) address to the start of the range.
+ * @param size The size of the memory range provided by the user.
+ * @param f Iterator function to handle a part of the memory range in one page.
+ * @param state State for the helper function to use.
+ * @return `true` if and only if accessing the entire memory range succeeded.
+ */
+static bool memory_pages_foreach(
+  void *user_address,
+  unsigned size,
+  page_foreach_func f,
+  void *state
+) {
+  void *buffer = get_kernel_address(user_address);
+  if (!user_owns_memory_range(user_address, size)) {
+    return false;
+  }
+  ASSERT(buffer != NULL);
+  // The trivial case, when the entire buffer fits inside the page.
+  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
+  if (buffer_end_offset < PGSIZE) {
+    (*f)(buffer, size, state);
+    return true;
+  }
+
+  // Otherwise, we have the start of the buffer reaching the end of a page,
+  // an optional number of full pages in the middle of the buffer,
+  // and the end of the buffer possibly ending at a different page.
+
+  // The size occupied in the first page by the buffer.
+  unsigned buffer_start_page_size = 0;
+  if (pg_ofs(user_address) != 0) {
+    // Read the first page
+    buffer_start_page_size = PGSIZE - pg_ofs(user_address);
+    (*f)(buffer, buffer_start_page_size, state);
+    // Progress to the end of the page
+    user_address += buffer_start_page_size;
+    size -= buffer_start_page_size;
+  }
+  // Read all the full pages in the middle of the buffer, plus the
+  // page at the end.
+  while (size > 0) {
+    ASSERT(pg_ofs(user_address) == 0);
+    buffer = get_kernel_address(user_address);
+    ASSERT(buffer != NULL);
+    unsigned consumed = size < PGSIZE ? size : PGSIZE;
+    (*f)(buffer, consumed, state);
+    // If the last page is reached, consumed == size.
+    user_address += consumed;
+    size -= consumed;
+  }
+  return true;
+}
+
+/**
  * Get the kernel virtual address of a virtual user address from the page
  * directory provided.
  * @param pd The page directory from which to read.
@@ -244,6 +312,28 @@ static struct fd_entry *get_fd_entry(int fd) {
 }
 
 /**
+ * Checks whether the user owns a given block of memory of a given size, that
+ * starts at a given (virtual) address.
+ * @param buffer The virtual address to the buffer.
+ * @param size The length of the buffer that would be read from or written to.
+ * @return `true` if and only if all parts of the buffer are owned by the user.
+ */
+static bool user_owns_memory_range(const void *buffer, unsigned size) {
+  // Performing pointer arithmetic on a void* is undefined behaviour,
+  // so cast to a uint8_t* to comply with the standard.
+  for (unsigned i = 0; i < size; i += PGSIZE) {
+    if (get_kernel_address(&((uint8_t *)buffer)[i]) == NULL) {
+      return false;
+    }
+  }
+  // Check the end of the buffer as well.
+  if (get_kernel_address(&((uint8_t *)buffer)[size - 1]) == NULL) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * Takes a pointer to a memory address, and copies `size` bytes from `page` to
  * the beginning of the address stored at `state`, also incrementing the
  * address by `size` bytes.
@@ -257,6 +347,67 @@ static void page_copy(void *page, unsigned size, void *state) {
   ASSERT(start != NULL && *start != NULL);
   memcpy((void *)*start, (const void *)page, (unsigned long)size);
   *start += size;
+}
+
+/**
+ * Prints a given part of the page from a buffer to the console.
+ * The function does not provide synchronisation for console writes on its own.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void page_print(void *page, unsigned size, void *state UNUSED) {
+  unsigned bytes_written;
+  const void *page_part = (const void *)page;
+  // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
+  // this part of the buffer occupies in memory
+  for (
+    bytes_written = 0;
+    bytes_written + MAX_WRITE_SIZE < size;
+    bytes_written += MAX_WRITE_SIZE
+  ) {
+    putbuf(page_part + bytes_written, MAX_WRITE_SIZE);
+  }
+  // Write the remaining bytes in the page
+  putbuf(page_part + bytes_written, size - bytes_written);
+}
+
+/**
+ * Reads input from the console, writing it to the given page of the buffer.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for console reads on its own.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
+ * @param state State parameter (Unused.)
+ */
+static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
+  uint8_t *page_part = (uint8_t *)page_;
+  for (unsigned i = 0; i < size; i++) {
+    page_part[i] = input_getc();
+  }
+}
+
+/**
+ * Helper function for reading from a file, and writing it to the given page
+ * of the buffer. Will do nothing once an EOF has been reached.
+ * The original buffer should not point to a read-only section of memory.
+ * The function does not provide synchronisation for file reads on its own.
+ * @param page The portion of the page in part of the buffer, to be written to.
+ * @param size The size of the portion of the page
+ * @param state_ A pointer to a `struct file_read_state`
+ * @see struct file_read_state
+ */
+static void page_file_read(void *page, unsigned size, void *state_) {
+  struct file_read_state *state = (struct file_read_state *)state_;
+  if (state->eof_reached) return;
+  unsigned bytes_read = file_read(state->file, page, size);
+  if (bytes_read < size) {
+    // The buffer has not been fully written to, indicating we are at the
+    // end of the file.
+    state->eof_reached = true;
+  } else {
+    state->bytes_read += bytes_read;
+  }
 }
 
 /**
@@ -408,136 +559,6 @@ static void filesize(struct intr_frame *f) {
 }
 
 /**
- * Checks whether the user owns a given block of memory of a given size, that
- * starts at a given (virtual) address.
- * @param buffer The virtual address to the buffer.
- * @param size The length of the buffer that would be read from or written to.
- * @return `true` if and only if all parts of the buffer are owned by the user.
- */
-static bool user_owns_memory_range(const void *buffer, unsigned size) {
-  // Performing pointer arithmetic on a void* is undefined behaviour,
-  // so cast to a uint8_t* to comply with the standard.
-  for (unsigned i = 0; i < size; i += PGSIZE) {
-    if (get_kernel_address(&((uint8_t *)buffer)[i]) == NULL) {
-      return false;
-    }
-  }
-  // Check the end of the buffer as well.
-  if (get_kernel_address(&((uint8_t *)buffer)[size - 1]) == NULL) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Iterator for all parts of pages mapped by memory of a given length (e.g.
- * an array).
- * Applies the foreach function to each section of a page with the size of
- * the section of memory held in that page, and the state.
- * Fails, returning false, if the range does not map to a block of memory
- * owned by the current process.
- * Care must be taken to ensure that the foreach function does not attempt to
- * write to read-only data, if the provided memory range is also read-only.
- * @param user_address The virtual (user) address to the start of the range.
- * @param size The size of the memory range provided by the user.
- * @param f Iterator function to handle a part of the memory range in one page.
- * @param state State for the helper function to use.
- * @return `true` if and only if accessing the entire memory range succeeded.
- */
-static bool memory_pages_foreach(
-  void *user_address,
-  unsigned size,
-  page_foreach_func f,
-  void *state
-) {
-  void *buffer = get_kernel_address(user_address);
-  if (!user_owns_memory_range(user_address, size)) {
-    return false;
-  }
-  ASSERT(buffer != NULL);
-  // The trivial case, when the entire buffer fits inside the page.
-  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
-  if (buffer_end_offset < PGSIZE) {
-    (*f)(buffer, size, state);
-    return true;
-  }
-
-  // Otherwise, we have the start of the buffer reaching the end of a page,
-  // an optional number of full pages in the middle of the buffer,
-  // and the end of the buffer possibly ending at a different page.
-
-  // The size occupied in the first page by the buffer.
-  unsigned buffer_start_page_size = 0;
-  if (pg_ofs(user_address) != 0) {
-    // Read the first page
-    buffer_start_page_size = PGSIZE - pg_ofs(user_address);
-    (*f)(buffer, buffer_start_page_size, state);
-    // Progress to the end of the page
-    user_address += buffer_start_page_size;
-    size -= buffer_start_page_size;
-  }
-  // Read all the full pages in the middle of the buffer, plus the
-  // page at the end.
-  while (size > 0) {
-    ASSERT(pg_ofs(user_address) == 0);
-    buffer = get_kernel_address(user_address);
-    ASSERT(buffer != NULL);
-    unsigned consumed = size < PGSIZE ? size : PGSIZE;
-    (*f)(buffer, consumed, state);
-    // If the last page is reached, consumed == size.
-    user_address += consumed;
-    size -= consumed;
-  }
-  return true;
-}
-
-/**
- * Reads input from the console, writing it to the given page of the buffer.
- * The original buffer should not point to a read-only section of memory.
- * The function does not provide synchronisation for console reads on its own.
- * @param page_ The physical address of the portion of the buffer.
- * @param size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
-static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
-  uint8_t *page_part = (uint8_t *)page_;
-  for (unsigned i = 0; i < size; i++) {
-    page_part[i] = input_getc();
-  }
-}
-
-/// State struct to be used by the buffer page iterator, storing the file being
-/// read, the total number of bytes read, and whether EOF has been reached.
-struct file_read_state {
-  struct file *file;
-  unsigned bytes_read;
-  bool eof_reached;
-};
-
-/**
- * Helper function for reading from a file, and writing it to the given page
- * of the buffer. Will do nothing once an EOF has been reached.
- * The original buffer should not point to a read-only section of memory.
- * The function does not provide synchronisation for file reads on its own.
- * @param page The portion of the page in part of the buffer, to be written to.
- * @param size The size of the portion of the page
- * @param state_ A pointer to a `struct file_read_state`
- * @see struct file_read_state
- */
-static void page_file_read(void *page, unsigned size, void *state_) {
-  struct file_read_state *state = (struct file_read_state *)state_;
-  if (state->eof_reached) return;
-  unsigned bytes_read = file_read(state->file, page, size);
-  if (bytes_read < size) {
-    // The buffer has not been fully written to, indicating we are at the
-    // end of the file.
-    state->eof_reached = true;
-  } else {
-    state->bytes_read += bytes_read;
-  }
-}
-
-/**
  * Handles read system calls.
  * @param f The interrupt stack frame
  */
@@ -589,29 +610,6 @@ static void read(struct intr_frame *f) {
     bytes_read = state.bytes_read;
   }
   f->eax = bytes_read;
-}
-
-/**
- * Prints a given part of the page from a buffer to the console.
- * The function does not provide synchronisation for console writes on its own.
- * @param page_ The physical address of the portion of the buffer.
- * @param size The size of the portion held in the page.
- * @param state State parameter (Unused.)
- */
-static void page_print(void *page, unsigned size, void *state UNUSED) {
-  unsigned bytes_written;
-  const void *page_part = (const void *)page;
-  // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
-  // this part of the buffer occupies in memory
-  for (
-    bytes_written = 0;
-    bytes_written + MAX_WRITE_SIZE < size;
-    bytes_written += MAX_WRITE_SIZE
-  ) {
-    putbuf(page_part + bytes_written, MAX_WRITE_SIZE);
-  }
-  // Write the remaining bytes in the page
-  putbuf(page_part + bytes_written, size - bytes_written);
 }
 
 /**
