@@ -7,6 +7,7 @@
 #include "userprog/process.h"
 #include <hash.h>
 #include <stdio.h>
+#include <string.h>
 #include "threads/interrupt.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
@@ -18,17 +19,20 @@
 #define MAX_WRITE_SIZE 300
 
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
-#define AN_ARG(t1, n1, number)                               \
-  void *arg ## number ## _ = ((uint32_t *) f->esp)+number;   \
-  void *arg ## number ## _kernel_ = access_user_memory(      \
-    thread_current()->pagedir,                               \
-    arg ## number ## _                                       \
-  );                                                         \
-  if (arg ## number ## _kernel_ == NULL) {                   \
+#define AN_ARG(type, name, number)                           \
+  void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
+  type name;                                                 \
+  void *start ## number ## _kernel = (void *) &name;         \
+  /* copy argument, which may be on separate pages */        \
+  if (!buffer_pages_foreach(                                 \
+    arg ## number ## _,                                      \
+    sizeof(type),                                            \
+    &buffer_page_copy,                                       \
+    (void *) &start ## number ## _kernel                     \
+  )) {                                                       \
     exit_user_process(-1);                                   \
     NOT_REACHED();                                           \
-  }                                                          \
-  t1 n1 = *((t1 *) arg ## number ## _kernel_);
+  }
 
 /**
  * Get one argument from the interrupt frame.
@@ -127,6 +131,11 @@ static void syscall_handler (struct intr_frame *);
 
 // Helper functions for reading to and writing from buffer pages.
 
+static void buffer_page_copy(
+  void *buffer_page,
+  unsigned buffer_page_size,
+  void *state
+);
 static void buffer_page_print(
   void *buffer_page_,
   unsigned buffer_page_size,
@@ -208,6 +217,29 @@ static void *access_user_memory(uint32_t *pd, const void *uaddr) {
   }
 
   return pagedir_get_page(pd, uaddr);
+}
+
+/**
+ * Takes a pointer to a memory address, and copies buffer_page_size bytes from
+ * the beginning of the address stored at `state`, also incrementing the
+ * address by `buffer_page_size` bytes.
+ * @param buffer_page_
+ * @param buffer_page_size
+ * @param state The address (of type `uint8_t **`) to the value being copied
+ * (and incremented).
+ */
+static void buffer_page_copy(
+    void *buffer_page,
+    unsigned buffer_page_size,
+    void *state
+) {
+  uint8_t **start = (uint8_t **)state;
+  memcpy(
+    (void *)*start,
+    (const void *)buffer_page,
+    (unsigned long)buffer_page_size
+  );
+  *start += buffer_page_size;
 }
 
 /**
