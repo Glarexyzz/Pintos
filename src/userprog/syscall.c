@@ -125,6 +125,13 @@ struct file_read_state {
   bool eof_reached;
 };
 
+/// State struct to be used by the buffer page iterator, storing the file being
+/// written to, and the total number of bytes written.
+struct file_write_state {
+  struct file *file;
+  unsigned bytes_written;
+};
+
 static void exit_if_false(bool cond);
 
 static bool memory_pages_foreach(
@@ -145,6 +152,7 @@ static void page_copy(void *page, unsigned size, void *state);
 static void page_print(void *page, unsigned size, void *state UNUSED);
 static void page_console_read(void *page_, unsigned size, void *state UNUSED);
 static void page_file_read(void *page, unsigned size, void *state_);
+static void page_file_write(void *page, unsigned size, void *state_);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
@@ -407,6 +415,19 @@ static void page_file_read(void *page, unsigned size, void *state_) {
 }
 
 /**
+ * Helper function for writing to a file, from a given page of the buffer.
+ * The function does not provide synchronisation for file reads on its own.
+ * @param page The portion of the page in part of the buffer, to be read from.
+ * @param size The size of the portion of the page
+ * @param state_ A pointer to a `struct file_write_state`
+ * @see struct file_write_state
+ */
+static void page_file_write(void *page, unsigned size, void *state_) {
+  struct file_write_state *state = (struct file_write_state *)state_;
+  state->bytes_written += (unsigned)file_write(state->file, page, size);
+}
+
+/**
  * Placeholder for unimplemented system calls.
  * @param f The interrupt stack frame
  */
@@ -645,11 +666,24 @@ static void write(struct intr_frame *f) {
     struct fd_entry *entry = get_fd_entry(fd);
     exit_if_false(entry != NULL);
 
-    lock_acquire(&file_system_lock);
-    int bytes_written = file_write(entry->file, buffer, size);
-    lock_release(&file_system_lock);
+    // Initialise the current state of writing to the file from the buffer.
+    struct file_write_state state;
+    state.file = entry->file;
+    state.bytes_written = 0;
 
-    f->eax = bytes_written;
+    lock_acquire(&file_system_lock);
+    // The iterator will check the user-provided buffer.
+    // If it is invalid, no copying will take place.
+    bool success = memory_pages_foreach(
+      (void *)user_buffer,
+      size,
+      &page_file_write,
+      &state
+    );
+    lock_release(&file_system_lock);
+    exit_if_false(success);
+
+    f->eax = state.bytes_written;
   }
 }
 
