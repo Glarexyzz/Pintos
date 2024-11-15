@@ -125,7 +125,7 @@ static bool buffer_pages_foreach(
   void *state
 );
 
-static void *access_user_memory(uint32_t *pd, const void *uaddr);
+static void *get_kernel_address(const void *uaddr);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
@@ -210,13 +210,13 @@ syscall_init (void)
  * @remark If NULL is returned, the caller should free its resources and call
  * exit_user_process(-1).
  */
-static void *access_user_memory(uint32_t *pd, const void *uaddr) {
+static void *get_kernel_address(const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
   if (!is_user_vaddr(uaddr)) {
     return NULL;
   }
 
-  return pagedir_get_page(pd, uaddr);
+  return pagedir_get_page(thread_current()->pagedir, uaddr);
 }
 
 /**
@@ -277,10 +277,7 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  char *physical_cmd_line = access_user_memory(
-    thread_current()->pagedir,
-    cmd_line
-  );
+  char *physical_cmd_line = get_kernel_address(cmd_line);
 
   // Terminate process if pointer is invalid.
   if (physical_cmd_line == NULL) {
@@ -313,10 +310,7 @@ static void create(struct intr_frame *f) {
   );
 
   //Access memory
-  const char *physical_filename = access_user_memory(
-      thread_current()->pagedir,
-      user_filename
-  );
+  const char *physical_filename = get_kernel_address(user_filename);
 
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
@@ -341,10 +335,7 @@ static void remove_handler(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   //Access memory
-  const char *physical_filename = access_user_memory(
-      thread_current()->pagedir,
-      user_filename
-  );
+  const char *physical_filename = get_kernel_address(user_filename);
 
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
@@ -369,10 +360,7 @@ static void open(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   struct thread *cur_thread = thread_current();
-  const char *physical_filename = access_user_memory(
-    cur_thread->pagedir,
-    user_filename
-  );
+  const char *physical_filename = get_kernel_address(user_filename);
 
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
@@ -445,16 +433,15 @@ static void filesize(struct intr_frame *f) {
  * @return `true` if and only if all parts of the buffer are owned by the user.
  */
 static bool user_owns_memory_range(const void *buffer, unsigned size) {
-  uint32_t *pd = thread_current()->pagedir;
   // Performing pointer arithmetic on a void* is undefined behaviour,
   // so cast to a uint8_t* to comply with the standard.
   for (unsigned i = 0; i < size; i += PGSIZE) {
-    if (access_user_memory(pd, &((uint8_t *)buffer)[i]) == NULL) {
+    if (get_kernel_address(&((uint8_t *)buffer)[i]) == NULL) {
       return false;
     }
   }
   // Check the end of the buffer as well.
-  if (access_user_memory(pd, &((uint8_t *)buffer)[size - 1]) == NULL) {
+  if (get_kernel_address(&((uint8_t *)buffer)[size - 1]) == NULL) {
     return false;
   }
   return true;
@@ -480,8 +467,7 @@ static bool buffer_pages_foreach(
   block_foreach_func f,
   void *state
 ) {
-  uint32_t *pd = thread_current()->pagedir;
-  void *buffer = access_user_memory(pd, user_buffer);
+  void *buffer = get_kernel_address(user_buffer);
   if (!user_owns_memory_range(user_buffer, size)) {
     return false;
   }
@@ -511,7 +497,7 @@ static bool buffer_pages_foreach(
   // page at the end.
   while (size > 0) {
     ASSERT(pg_ofs(user_buffer) == 0);
-    buffer = access_user_memory(pd, user_buffer);
+    buffer = get_kernel_address(user_buffer);
     ASSERT(buffer != NULL);
     unsigned consumed = size < PGSIZE ? size : PGSIZE;
     (*f)(buffer, consumed, state);
@@ -687,10 +673,7 @@ static void write(struct intr_frame *f) {
     unsigned, size
   );
 
-  const char *buffer = access_user_memory(
-    thread_current()->pagedir,
-    user_buffer
-  );
+  const char *buffer = get_kernel_address(user_buffer);
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
   if (buffer == NULL) {
@@ -837,10 +820,7 @@ syscall_handler (struct intr_frame *f)
 {
   uint32_t *syscall_no_addr = f->esp;
 
-  uint32_t *physical_syscall_no_addr = access_user_memory(
-    thread_current()->pagedir,
-    syscall_no_addr
-  );
+  uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
 
   // Terminating the offending process and freeing its resources
   // for invalid pointer address.
