@@ -300,6 +300,8 @@ process_execute (const char *file_name)
 
   // Wait for the process to either start up successfully, or fail starting up
   sema_down(&aux.sema);
+  // At this point, the thread no longer needs the filename copy
+  palloc_free_page(fn_copy);
 
   // Process failed to start up
   if (!aux.status) return TID_ERROR;
@@ -403,7 +405,6 @@ start_process (void *aux_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success) goto startup_failure;
 
   // Initialise the file descriptor table.
@@ -758,7 +759,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp, const char* file_name);
+static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -879,8 +880,20 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp, file_name))
+  if (!setup_stack (esp))
     goto done;
+
+  // Parse arguments and load them onto the stack.
+  struct pass_args_data pass_args_data;
+  // Decrement the stack pointer.
+  if (!parse_argument_string(file_name, esp, &pass_args_data))
+    goto done;
+
+  // Populate the stack.
+  bool second_pass =
+      parse_argument_string(file_name, NULL, &pass_args_data);
+  // If the first parse was successful, the second needs to be as well.
+  ASSERT(second_pass);
 
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
@@ -1017,30 +1030,21 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp, const char* file_name)
+setup_stack (void **esp)
 {
   uint8_t *kpage;
+  bool success = false;
+
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  if (kpage != NULL)
     {
-      if (!install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true)) {
-        palloc_free_page(kpage);
-        return false;
-      }
-      *esp = PHYS_BASE;
-
-      // Decrement the stack pointer.
-      struct pass_args_data pass_args_data;
-      if (!parse_argument_string(file_name, esp, &pass_args_data))
-        return false;
-
-      // Populate the stack.
-      bool second_pass =
-        parse_argument_string(file_name, NULL, &pass_args_data);
-      // If the first parse was successful, the second needs to be as well.
-      ASSERT(second_pass);
+      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+      if (success)
+        *esp = PHYS_BASE;
+      else
+        palloc_free_page (kpage);
     }
-  return true;
+  return success;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
