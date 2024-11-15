@@ -112,7 +112,7 @@ struct thread
     bool is_user;                       /* Whether this thread is a user
                                          * process */
 
-    struct list child_tids;             /* Children processes. */
+    struct list child_pids;             /* Children processes. */
     struct hash fd_table;               /* File descriptor table. */
     int fd_counter;                     /* Counter for allocating file
                                          * descriptor number. */

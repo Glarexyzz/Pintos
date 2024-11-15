@@ -793,7 +793,7 @@ init_thread (struct thread *t, const char *name, int priority)
     t->lock_to_wait = NULL;
   }
 #ifdef USERPROG
-  list_init (&t->child_tids);
+  list_init (&t->child_pids);
   t->is_user = false;
 #endif
 

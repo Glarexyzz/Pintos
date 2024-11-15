@@ -34,7 +34,7 @@ static unsigned user_process_hash(
   const struct hash_elem *element,
   void *aux UNUSED
 );
-static bool user_process_tid_smaller(
+static bool user_process_pid_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
   void *aux UNUSED
@@ -208,8 +208,8 @@ static unsigned user_process_hash(
   const struct hash_elem *element,
   void *aux UNUSED
 ) {
-  tid_t tid = hash_entry(element, struct process_status, elem)->tid;
-  return hash_int(tid);
+  pid_t pid = hash_entry(element, struct process_status, elem)->pid;
+  return hash_int(pid);
 }
 
 /**
@@ -219,14 +219,14 @@ static unsigned user_process_hash(
  * @param aux Unused.
  * @return True iff a < b.
  */
-static bool user_process_tid_smaller(
+static bool user_process_pid_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
   void *aux UNUSED
 ) {
-  tid_t a_tid = hash_entry(a, struct process_status, elem)->tid;
-  tid_t b_tid = hash_entry(b, struct process_status, elem)->tid;
-  return a_tid < b_tid;
+  pid_t a_pid = hash_entry(a, struct process_status, elem)->pid;
+  pid_t b_pid = hash_entry(b, struct process_status, elem)->pid;
+  return a_pid < b_pid;
 }
 
 /**
@@ -236,7 +236,7 @@ void user_process_hashmap_init() {
   bool success = hash_init(
     &user_processes,
     &user_process_hash,
-    &user_process_tid_smaller,
+    &user_process_pid_smaller,
     NULL
   );
   if (!success) PANIC("Could not initialise the user programs hashmap!");
@@ -304,20 +304,20 @@ process_execute (const char *file_name)
   // Process failed to start up
   if (!aux.status) return TID_ERROR;
 
-  // Process successfully started up - add its TID to the parent's
-  // (current thread's) list of child TIDs.
+  // Process successfully started up - add its PID to the parent's
+  // (current thread's) list of child PIDs.
 
-  // Initialise the tid entry
-  struct process_tid *new_child_tid_struct =
-    malloc(sizeof(struct process_tid));
+  // Initialise the pid entry
+  struct process_pid *new_child_pid_struct =
+    malloc(sizeof(struct process_pid));
 
-  if (new_child_tid_struct == NULL) {
+  if (new_child_pid_struct == NULL) {
     // Remove the child's entry from the processes hashmap, since the parent
     // can never wait for it
 
     // Find and delete the child's entry in the hashmap
     struct process_status process_to_find;
-    process_to_find.tid = tid;
+    process_to_find.pid = tid;
 
     lock_acquire(&user_processes_lock);
     struct hash_elem *child_process_elem = hash_delete(
@@ -337,10 +337,10 @@ process_execute (const char *file_name)
     return TID_ERROR;
   }
 
-  new_child_tid_struct->tid = tid;
+  new_child_pid_struct->pid = tid;
 
-  // Add the child tid elem to the current parent process's child_tids list.
-  list_push_back(&thread_current()->child_tids, &new_child_tid_struct->elem);
+  // Add the child pid elem to the current parent process's child_pids list.
+  list_push_back(&thread_current()->child_pids, &new_child_pid_struct->elem);
 
   return tid;
 }
@@ -415,7 +415,7 @@ start_process (void *aux_)
 
   if (new_child_status == NULL) goto startup_failure;
 
-  new_child_status->tid = thread_current()->tid;
+  new_child_status->pid = thread_current()->tid;
   sema_init(&new_child_status->sema, 0);
 
   // Add the entry to the hashmap
@@ -445,41 +445,41 @@ start_process (void *aux_)
   thread_exit ();
 }
 
-/* Waits for thread TID to die and returns its exit status. 
+/* Waits for thread PID to die and returns its exit status.
  * If it was terminated by the kernel (i.e. killed due to an exception), 
  * returns ERROR_STATUS_CODE.
- * If TID is invalid or if it was not a child of the calling process, or if 
- * process_wait() has already been successfully called for the given TID, 
+ * If PID is invalid or if it was not a child of the calling process, or if
+ * process_wait() has already been successfully called for the given PID,
  * returns ERROR_STATUS_CODE immediately, without waiting.
  */
 int
-process_wait (tid_t child_tid)
+process_wait (pid_t child_pid)
 {
   struct thread *cur_thread = thread_current();
 
-  // Check if the provided tid is in the caller's list of children
+  // Check if the provided pid is in the caller's list of children
   bool is_child = false;
   struct list_elem *child_elem;
 
-  // Iterate through the current thread's child thread tids
+  // Iterate through the current thread's child thread pids
   for (
-    child_elem = list_begin(&cur_thread->child_tids);
-    child_elem != list_end(&cur_thread->child_tids);
+    child_elem = list_begin(&cur_thread->child_pids);
+    child_elem != list_end(&cur_thread->child_pids);
     child_elem = list_next(child_elem)
   ) {
-    struct process_tid *child_tid_struct = list_entry(
+    struct process_pid *child_pid_struct = list_entry(
       child_elem,
-      struct process_tid,
+      struct process_pid,
       elem
     );
-    // the wait is valid when the child's tid matches the called tid
-    if (child_tid_struct->tid == child_tid) {
+    // the wait is valid when the child's pid matches the called pid
+    if (child_pid_struct->pid == child_pid) {
       is_child = true;
       break;
     }
   }
 
-  // If the provided tid was not in the caller's list of children, return
+  // If the provided pid was not in the caller's list of children, return
   if (!is_child) return ERROR_STATUS_CODE;
 
   // Remove the thread we're waiting for from the list of children, since we can
@@ -487,13 +487,13 @@ process_wait (tid_t child_tid)
   list_remove(child_elem);
   free(list_entry(
     child_elem,
-    struct process_tid,
+    struct process_pid,
     elem
   ));
 
   // Find the child process's entry in the user_processes hashmap
   struct process_status process_to_find;
-  process_to_find.tid = child_tid;
+  process_to_find.pid = child_pid;
 
   lock_acquire(&user_processes_lock);
   struct hash_elem *process_found_elem = hash_find(
@@ -555,7 +555,7 @@ void exit_user_process(int status) {
 
   // Setup to find the current process in the user_processes hashmap
   struct process_status process_to_find;
-  process_to_find.tid = cur_thread->tid;
+  process_to_find.pid = cur_thread->tid;
 
   lock_acquire(&user_processes_lock);
 
@@ -610,27 +610,27 @@ process_exit (void)
   // user_processes hashmap, since no processes can wait for them anymore
 
   // Delete all this process's children from the hashmap
-  struct list_elem *curr_child = list_begin(&cur->child_tids);
+  struct list_elem *curr_child = list_begin(&cur->child_pids);
 
   // Loop through all the process's children
-  while (curr_child != list_end(&cur->child_tids)) {
+  while (curr_child != list_end(&cur->child_pids)) {
 
-    // Get the process_tid struct of the child
-    struct process_tid *curr_child_process_tid = list_entry(
+    // Get the process_pid struct of the child
+    struct process_pid *curr_child_process_pid = list_entry(
       curr_child,
-      struct process_tid,
+      struct process_pid,
       elem
     );
 
     // Setup to find the child process in the user_processes hashmap
     struct process_status child_to_find;
-    child_to_find.tid = curr_child_process_tid->tid;
+    child_to_find.pid = curr_child_process_pid->pid;
 
     // Remove the child from the current process's list, and free its struct
     struct list_elem *prev_child = curr_child;
     curr_child = list_next(prev_child);
     list_remove(prev_child);
-    free(curr_child_process_tid);
+    free(curr_child_process_pid);
 
     // Delete and free the child from the hash table, if it exists
     lock_acquire(&user_processes_lock);
