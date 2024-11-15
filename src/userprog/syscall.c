@@ -631,25 +631,16 @@ static void write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
   THREE_ARG(
     int, fd,
-    const void *, user_buffer,
+    const void *, buffer,
     unsigned, size
   );
-
-  const char *buffer = get_kernel_address(user_buffer);
-  exit_if_false(buffer != NULL);
-
-  // If we don't own the buffer's memory, the operation is invalid.
-  if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(ERROR_STATUS_CODE);
-    NOT_REACHED();
-  }
 
   if (fd == STDOUT_FD) {
     // Console write
 
     lock_acquire(&console_lock);
     bool success = memory_pages_foreach(
-      (void *)user_buffer,
+      (void *)buffer,
       size,
       &page_print,
       NULL
@@ -675,7 +666,7 @@ static void write(struct intr_frame *f) {
     // The iterator will check the user-provided buffer.
     // If it is invalid, no copying will take place.
     bool success = memory_pages_foreach(
-      (void *)user_buffer,
+      (void *)buffer,
       size,
       &page_file_write,
       &state
