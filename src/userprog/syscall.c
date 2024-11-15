@@ -462,10 +462,10 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  char *physical_cmd_line = get_kernel_address(cmd_line);
-  exit_if_false(physical_cmd_line != NULL);
+  char *kernel_cmd_line = get_kernel_address(cmd_line);
+  exit_if_false(kernel_cmd_line != NULL);
 
-  f->eax = process_execute(physical_cmd_line);
+  f->eax = process_execute(kernel_cmd_line);
 }
 
 /**
@@ -489,11 +489,11 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_create(physical_filename, initial_size);
+  bool success = filesys_create(kernel_filename, initial_size);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -507,11 +507,11 @@ static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_remove(physical_filename);
+  bool success = filesys_remove(kernel_filename);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -527,11 +527,11 @@ static void open(struct intr_frame *f) {
 
   struct thread *cur_thread = thread_current();
 
-  const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_false(physical_filename != NULL);
+  const char *kernel_filename = get_kernel_address(user_filename);
+  exit_if_false(kernel_filename != NULL);
 
   lock_acquire(&file_system_lock);
-  struct file *new_file = filesys_open(physical_filename);
+  struct file *new_file = filesys_open(kernel_filename);
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
@@ -743,10 +743,10 @@ syscall_handler (struct intr_frame *f)
 {
   uint32_t *syscall_no_addr = f->esp;
 
-  uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
-  exit_if_false(physical_syscall_no_addr != NULL);
+  uint32_t *kernel_syscall_no_addr = get_kernel_address(syscall_no_addr);
+  exit_if_false(kernel_syscall_no_addr != NULL);
 
-  uint32_t syscall_no = *physical_syscall_no_addr;
+  uint32_t syscall_no = *kernel_syscall_no_addr;
 
   exit_if_false(syscall_no <
                 sizeof(syscall_handlers) / sizeof(syscall_handler_func));
