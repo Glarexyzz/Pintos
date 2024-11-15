@@ -402,9 +402,8 @@ static void page_file_read(void *page, unsigned size, void *state_) {
     // The buffer has not been fully written to, indicating we are at the
     // end of the file.
     state->eof_reached = true;
-  } else {
-    state->bytes_read += bytes_read;
   }
+  state->bytes_read += bytes_read;
 }
 
 /**
