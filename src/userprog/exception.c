@@ -88,7 +88,7 @@ kill (struct intr_frame *f)
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
       if (thread_current()->is_user) {
-        exit_user_process(-1);
+        exit_user_process(ERROR_STATUS_CODE);
       } else {
         thread_exit();
       }

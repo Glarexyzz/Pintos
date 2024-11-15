@@ -488,7 +488,7 @@ process_wait (tid_t child_tid)
   }
 
   // If the provided tid was not in the caller's list of children, return
-  if (!is_child) return -1;
+  if (!is_child) return ERROR_STATUS_CODE;
 
   // Remove the thread we're waiting for from the list of children, since we can
   // only wait for a child process once

@@ -18,6 +18,10 @@
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
 
+#define SYSCALL_ERROR_CODE -1
+#define STDIN_FD 0
+#define STDOUT_FD 1
+
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
 #define AN_ARG(type, name, number)                           \
   void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
@@ -30,7 +34,7 @@
     &buffer_page_copy,                                       \
     (void *) &start ## number ## _kernel                     \
   )) {                                                       \
-    exit_user_process(-1);                                   \
+    exit_user_process(ERROR_STATUS_CODE);                    \
     NOT_REACHED();                                           \
   }
 
@@ -208,7 +212,7 @@ syscall_init (void)
  */
 static void exit_if_null(const void *ptr) {
   if (ptr == NULL) {
-    exit_user_process(-1);
+    exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
   }
 }
@@ -222,7 +226,7 @@ static void exit_if_null(const void *ptr) {
  * @remark For safety, do not perform pointer arithmetic on the returned pointer
  * from this function.
  * @remark If NULL is returned, the caller should free its resources and call
- * exit_user_process(-1).
+ * exit_user_process(ERROR_STATUS_CODE).
  */
 static void *get_kernel_address(const void *uaddr) {
   // Return NUll if we're not accessing an address in user-space
@@ -364,7 +368,7 @@ static void open(struct intr_frame *f) {
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
-    f->eax = -1;
+    f->eax = SYSCALL_ERROR_CODE;
     return;
   }
 
@@ -372,7 +376,7 @@ static void open(struct intr_frame *f) {
   struct fd_entry *new_fd_entry =
     malloc(sizeof(struct fd_entry));
   if (new_fd_entry == NULL) {
-    f->eax = -1;
+    f->eax = SYSCALL_ERROR_CODE;
     return;
   }
 
@@ -563,7 +567,7 @@ static void read(struct intr_frame *f) {
 
   int bytes_read;
 
-  if (fd == 0) {
+  if (fd == STDIN_FD) {
     // Read from the console.
     lock_acquire(&console_lock);
     bool success = buffer_pages_foreach(
@@ -574,7 +578,7 @@ static void read(struct intr_frame *f) {
     );
     lock_release(&console_lock);
     if (!success) {
-      exit_user_process(-1);
+      exit_user_process(ERROR_STATUS_CODE);
       NOT_REACHED();
     }
     // Given the original memory is valid, we will record all `size` bytes
@@ -592,7 +596,7 @@ static void read(struct intr_frame *f) {
   	  &fd_to_find.elem
   	);
   	if (fd_found_elem == NULL) {
-      f->eax = -1;
+      f->eax = SYSCALL_ERROR_CODE;
       return;
   	}
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
@@ -612,7 +616,7 @@ static void read(struct intr_frame *f) {
     );
     lock_release(&file_system_lock);
     if (!success) {
-      exit_user_process(-1);
+      exit_user_process(ERROR_STATUS_CODE);
       NOT_REACHED();
     }
 
@@ -665,11 +669,11 @@ static void write(struct intr_frame *f) {
 
   // If we don't own the buffer's memory, the operation is invalid.
   if (!user_owns_memory_range(user_buffer, size)) {
-    exit_user_process(-1);
+    exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
   }
 
-  if (fd == 1) {
+  if (fd == STDOUT_FD) {
     // Console write
 
     lock_acquire(&console_lock);
@@ -681,7 +685,7 @@ static void write(struct intr_frame *f) {
     );
     lock_release(&console_lock);
     if (!success) {
-      exit_user_process(-1);
+      exit_user_process(ERROR_STATUS_CODE);
       NOT_REACHED();
     }
     // Given the original memory is valid, putbuf will succeed
@@ -796,7 +800,7 @@ syscall_handler (struct intr_frame *f)
   uint32_t syscall_no = *physical_syscall_no_addr;
 
   if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
-    exit_user_process(-1);
+    exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
   }
 
