@@ -118,6 +118,8 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
  */
 typedef void (*block_foreach_func) (void *, unsigned, void *);
 
+static void exit_if_null(const void *ptr);
+
 static bool buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
@@ -200,6 +202,18 @@ syscall_init (void)
 }
 
 /**
+ * Exit the user process with an error status if the provided pointer is NULL.
+ * @param ptr The pointer to check.
+ * @remark Will not return if the pointer is NULL.
+ */
+static void exit_if_null(const void *ptr) {
+  if (ptr == NULL) {
+    exit_user_process(-1);
+    NOT_REACHED();
+  }
+}
+
+/**
  * Get the kernel virtual address of a virtual user address from the page
  * directory provided.
  * @param pd The page directory from which to read.
@@ -278,12 +292,7 @@ static void exec(struct intr_frame *f) {
   ONE_ARG(char *, cmd_line);
 
   char *physical_cmd_line = get_kernel_address(cmd_line);
-
-  // Terminate process if pointer is invalid.
-  if (physical_cmd_line == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(physical_cmd_line);
 
   f->eax = process_execute(physical_cmd_line);
 }
@@ -309,15 +318,8 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  //Access memory
   const char *physical_filename = get_kernel_address(user_filename);
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(physical_filename);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_create(physical_filename, initial_size);
@@ -334,15 +336,8 @@ static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
-  //Access memory
   const char *physical_filename = get_kernel_address(user_filename);
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(physical_filename);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_remove(physical_filename);
@@ -360,14 +355,9 @@ static void open(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   struct thread *cur_thread = thread_current();
-  const char *physical_filename = get_kernel_address(user_filename);
 
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_filename == NULL) {
-    exit_user_process(-1);
-    return;
-  }
+  const char *physical_filename = get_kernel_address(user_filename);
+  exit_if_null(physical_filename);
 
   lock_acquire(&file_system_lock);
   struct file *new_file = filesys_open(physical_filename);
@@ -411,10 +401,7 @@ static void filesize(struct intr_frame *f) {
     &thread_current()->fd_table,
     &fd_to_find.elem
   );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(fd_found_elem);
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
   lock_acquire(&file_system_lock);
@@ -674,12 +661,7 @@ static void write(struct intr_frame *f) {
   );
 
   const char *buffer = get_kernel_address(user_buffer);
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (buffer == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(buffer);
 
   // If we don't own the buffer's memory, the operation is invalid.
   if (!user_owns_memory_range(user_buffer, size)) {
@@ -715,10 +697,7 @@ static void write(struct intr_frame *f) {
   	  &thread_current()->fd_table,
   	  &fd_to_find.elem
   	);
-  	if (fd_found_elem == NULL) {
-  	  exit_user_process(-1);
-  	  NOT_REACHED();
-  	}
+    exit_if_null(fd_found_elem);
   	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
     lock_acquire(&file_system_lock);
@@ -747,10 +726,7 @@ static void seek(struct intr_frame *f) {
     &thread_current()->fd_table,
     &fd_to_find.elem
   );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(fd_found_elem);
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
   lock_acquire(&file_system_lock);
@@ -773,10 +749,7 @@ static void tell(struct intr_frame *f) {
     &thread_current()->fd_table,
     &fd_to_find.elem
   );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(fd_found_elem);
   struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
 
   lock_acquire(&file_system_lock);
@@ -801,10 +774,7 @@ static void close(struct intr_frame *f UNUSED) {
     &thread_current()->fd_table,
     &fd_to_find.elem
   );
-  if (fd_found_elem == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(fd_found_elem);
 
   // close file, free it, delete from fd_table.
   hash_delete(&thread_current()->fd_table, fd_found_elem);
@@ -821,13 +791,7 @@ syscall_handler (struct intr_frame *f)
   uint32_t *syscall_no_addr = f->esp;
 
   uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
-
-  // Terminating the offending process and freeing its resources
-  // for invalid pointer address.
-  if (physical_syscall_no_addr == NULL) {
-    exit_user_process(-1);
-    NOT_REACHED();
-  }
+  exit_if_null(physical_syscall_no_addr);
 
   uint32_t syscall_no = *physical_syscall_no_addr;
 
