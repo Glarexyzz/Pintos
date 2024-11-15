@@ -31,7 +31,7 @@
   if (!buffer_pages_foreach(                                 \
     arg ## number ## _,                                      \
     sizeof(type),                                            \
-    &buffer_page_copy,                                       \
+    &page_copy,                                              \
     (void *) &start ## number ## _kernel                     \
   )) {                                                       \
     exit_user_process(ERROR_STATUS_CODE);                    \
@@ -116,18 +116,18 @@ typedef void (*syscall_handler_func) (struct intr_frame *);
 
 /**
  * Type of auxiliary functions to handle memory held in pages mapped by a given
- * user's buffer.
+ * user's buffer at a specified memory range.
  * Takes a pointer to the kernel address to a given (part or whole) page,
  * the size of memory in that page, and a helper state.
  */
-typedef void (*block_foreach_func) (void *, unsigned, void *);
+typedef void (*page_foreach_func) (void *, unsigned, void *);
 
 static void exit_if_null(const void *ptr);
 
 static bool buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
-  block_foreach_func f,
+  page_foreach_func f,
   void *state
 );
 
@@ -138,26 +138,10 @@ static void syscall_handler (struct intr_frame *);
 
 // Helper functions for reading to and writing from buffer pages.
 
-static void buffer_page_copy(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state
-);
-static void buffer_page_print(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-);
-static void buffer_page_record_stdin(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-);
-static void buffer_page_file_read(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state_
-);
+static void page_copy(void *page, unsigned size, void *state);
+static void page_print(void *page, unsigned size, void *state UNUSED);
+static void page_console_read(void *page_, unsigned size, void *state UNUSED);
+static void page_file_read(void *page, unsigned size, void *state_);
 
 static void syscall_not_implemented(struct intr_frame *f);
 static void halt(struct intr_frame *f) NO_RETURN;
@@ -260,26 +244,19 @@ static struct fd_entry *get_fd_entry(int fd) {
 }
 
 /**
- * Takes a pointer to a memory address, and copies buffer_page_size bytes from
+ * Takes a pointer to a memory address, and copies `size` bytes from `page` to
  * the beginning of the address stored at `state`, also incrementing the
- * address by `buffer_page_size` bytes.
- * @param buffer_page_
- * @param buffer_page_size
+ * address by `size` bytes.
+ * @param page The physical address at the start of the the portion of the page
+ * @param size The size of the portion of the page
  * @param state The address (of type `uint8_t **`) to the value being copied
  * (and incremented).
  */
-static void buffer_page_copy(
-    void *buffer_page,
-    unsigned buffer_page_size,
-    void *state
-) {
+static void page_copy(void *page, unsigned size, void *state) {
   uint8_t **start = (uint8_t **)state;
-  memcpy(
-    (void *)*start,
-    (const void *)buffer_page,
-    (unsigned long)buffer_page_size
-  );
-  *start += buffer_page_size;
+  ASSERT(start != NULL && *start != NULL);
+  memcpy((void *)*start, (const void *)page, (unsigned long)size);
+  *start += size;
 }
 
 /**
@@ -434,8 +411,7 @@ static void filesize(struct intr_frame *f) {
  * Checks whether the user owns a given block of memory of a given size, that
  * starts at a given (virtual) address.
  * @param buffer The virtual address to the buffer.
- * @param size The length of the buffer that would be read from
- * or written to.
+ * @param size The length of the buffer that would be read from or written to.
  * @return `true` if and only if all parts of the buffer are owned by the user.
  */
 static bool user_owns_memory_range(const void *buffer, unsigned size) {
@@ -470,7 +446,7 @@ static bool user_owns_memory_range(const void *buffer, unsigned size) {
 static bool buffer_pages_foreach(
   void *user_buffer,
   unsigned size,
-  block_foreach_func f,
+  page_foreach_func f,
   void *state
 ) {
   void *buffer = get_kernel_address(user_buffer);
@@ -518,18 +494,14 @@ static bool buffer_pages_foreach(
  * Reads input from the console, writing it to the given page of the buffer.
  * The original buffer should not point to a read-only section of memory.
  * The function does not provide synchronisation for console reads on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
  * @param state State parameter (Unused.)
  */
-static void buffer_page_record_stdin(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-) {
-  uint8_t *buffer_page = (uint8_t *)buffer_page_;
-  for (unsigned i = 0; i < buffer_page_size; i++) {
-    buffer_page[i] = input_getc();
+static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
+  uint8_t *page_part = (uint8_t *)page_;
+  for (unsigned i = 0; i < size; i++) {
+    page_part[i] = input_getc();
   }
 }
 
@@ -546,20 +518,16 @@ struct file_read_state {
  * of the buffer. Will do nothing once an EOF has been reached.
  * The original buffer should not point to a read-only section of memory.
  * The function does not provide synchronisation for file reads on its own.
- * @param buffer_page
- * @param buffer_page_size
+ * @param page The portion of the page in part of the buffer, to be written to.
+ * @param size The size of the portion of the page
  * @param state_ A pointer to a `struct file_read_state`
  * @see struct file_read_state
  */
-static void buffer_page_file_read(
-  void *buffer_page,
-  unsigned buffer_page_size,
-  void *state_
-) {
+static void page_file_read(void *page, unsigned size, void *state_) {
   struct file_read_state *state = (struct file_read_state *)state_;
   if (state->eof_reached) return;
-  unsigned bytes_read = file_read(state->file, buffer_page, buffer_page_size);
-  if (bytes_read < buffer_page_size) {
+  unsigned bytes_read = file_read(state->file, page, size);
+  if (bytes_read < size) {
     // The buffer has not been fully written to, indicating we are at the
     // end of the file.
     state->eof_reached = true;
@@ -585,12 +553,7 @@ static void read(struct intr_frame *f) {
   if (fd == STDIN_FD) {
     // Read from the console.
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(
-      buffer,
-      size,
-      &buffer_page_record_stdin,
-      NULL
-    );
+    bool success = buffer_pages_foreach(buffer, size, &page_console_read, NULL);
     lock_release(&console_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
@@ -615,12 +578,7 @@ static void read(struct intr_frame *f) {
     state.bytes_read = 0;
 
     lock_acquire(&file_system_lock);
-    bool success = buffer_pages_foreach(
-      buffer,
-      size,
-      &buffer_page_file_read,
-      &state
-    );
+    bool success = buffer_pages_foreach(buffer, size, &page_file_read, &state);
     lock_release(&file_system_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
@@ -633,30 +591,26 @@ static void read(struct intr_frame *f) {
 }
 
 /**
- * Prints a given page of the buffer to the console.
+ * Prints a given part of the page from a buffer to the console.
  * The function does not provide synchronisation for console writes on its own.
- * @param buffer_page_ The physical address of the portion of the buffer.
- * @param page_size The size of the portion held in the page.
+ * @param page_ The physical address of the portion of the buffer.
+ * @param size The size of the portion held in the page.
  * @param state State parameter (Unused.)
  */
-static void buffer_page_print(
-  void *buffer_page_,
-  unsigned buffer_page_size,
-  void *state UNUSED
-) {
+static void page_print(void *page, unsigned size, void *state UNUSED) {
   unsigned bytes_written;
-  const void *buffer_page = (const void *)buffer_page_;
+  const void *page_part = (const void *)page;
   // Keep writing MAX_WRITE_SIZE bytes as long as it's less than the amount
   // this part of the buffer occupies in memory
   for (
     bytes_written = 0;
-    bytes_written + MAX_WRITE_SIZE < buffer_page_size;
+    bytes_written + MAX_WRITE_SIZE < size;
     bytes_written += MAX_WRITE_SIZE
   ) {
-    putbuf(buffer_page + bytes_written, MAX_WRITE_SIZE);
+    putbuf(page_part + bytes_written, MAX_WRITE_SIZE);
   }
   // Write the remaining bytes in the page
-  putbuf(buffer_page + bytes_written, buffer_page_size - bytes_written);
+  putbuf(page_part + bytes_written, size - bytes_written);
 }
 
 /**
@@ -684,12 +638,7 @@ static void write(struct intr_frame *f) {
     // Console write
 
     lock_acquire(&console_lock);
-    bool success = buffer_pages_foreach(
-      user_buffer,
-      size,
-      &buffer_page_print,
-      NULL
-    );
+    bool success = buffer_pages_foreach(user_buffer, size, &page_print, NULL);
     lock_release(&console_lock);
     if (!success) {
       exit_user_process(ERROR_STATUS_CODE);
