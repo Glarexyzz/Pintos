@@ -195,7 +195,7 @@ syscall_init (void)
  * @param ptr The pointer to check.
  * @remark Will not return if the pointer is NULL.
  */
-static void exit_if_null(const void *ptr) {
+static inline void exit_if_null(const void *ptr) {
   if (ptr == NULL) {
     exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
