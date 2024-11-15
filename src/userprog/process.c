@@ -60,7 +60,8 @@ struct pass_args_data {
 
 /// Used as the thread auxiliary data when new processes are created
 struct new_process_aux {
-  struct semaphore sema; // The semaphore which process_execute waits for
+  // The semaphore which process_execute waits for
+  struct semaphore startup_sema;
   bool status;           // The startup status of the process
   char *file_name;       // The name of the file to execute
 };
@@ -285,7 +286,7 @@ process_execute (const char *file_name)
 
   // Setup auxiliary data for starting the new process
   struct new_process_aux aux;
-  sema_init(&aux.sema, 0);
+  sema_init(&aux.startup_sema, 0);
   aux.file_name = fn_copy;
 
   /* Create a new thread to execute FILE_NAME. */
@@ -296,7 +297,7 @@ process_execute (const char *file_name)
   }
 
   // Wait for the process to either start up successfully, or fail starting up
-  sema_down(&aux.sema);
+  sema_down(&aux.startup_sema);
   // At this point, the thread no longer needs the filename copy
   palloc_free_page(fn_copy);
 
@@ -424,7 +425,7 @@ start_process (void *aux_)
 
   // Signal to the process's parent that start-up was successful
   aux->status = true;
-  sema_up(&aux->sema);
+  sema_up(&aux->startup_sema);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -439,7 +440,7 @@ start_process (void *aux_)
 
   // Signal to the process's parent that start-up was not successful
   aux->status = false;
-  sema_up(&aux->sema);
+  sema_up(&aux->startup_sema);
 
   thread_exit ();
 }
