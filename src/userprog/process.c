@@ -300,6 +300,8 @@ process_execute (const char *file_name)
 
   // Wait for the process to either start up successfully, or fail starting up
   sema_down(&aux.sema);
+  // At this point, the thread no longer needs the filename copy
+  palloc_free_page(fn_copy);
 
   // Process failed to start up
   if (!aux.status) return TID_ERROR;
@@ -403,7 +405,6 @@ start_process (void *aux_)
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
   if (!success) goto startup_failure;
 
   // Initialise the file descriptor table.
