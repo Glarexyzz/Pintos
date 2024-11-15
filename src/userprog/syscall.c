@@ -132,6 +132,7 @@ static bool buffer_pages_foreach(
 );
 
 static void *get_kernel_address(const void *uaddr);
+static struct fd_entry *get_fd_entry(int fd);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
@@ -235,6 +236,27 @@ static void *get_kernel_address(const void *uaddr) {
   }
 
   return pagedir_get_page(thread_current()->pagedir, uaddr);
+}
+
+/**
+ * Fetches an FD entry from the current thread's FD table.
+ * @param fd The FD number.
+ * @return A pointer to the FD entry, or NULL if there is no entry for the FD
+ * number.
+ */
+static struct fd_entry *get_fd_entry(int fd) {
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  struct hash_elem *fd_found_elem = hash_find(
+    &thread_current()->fd_table,
+    &fd_to_find.elem
+  );
+
+  if (fd_found_elem == NULL) return NULL;
+
+  return hash_entry(fd_found_elem, struct fd_entry, elem);
 }
 
 /**
@@ -397,19 +419,12 @@ static void filesize(struct intr_frame *f) {
   // int filesize(int fd)
   ONE_ARG(int, fd);
 
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-
-  // Search up the fd-file mapping from the fd table.
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  exit_if_null(fd_found_elem);
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_null(entry);
 
   lock_acquire(&file_system_lock);
-  int size = file_length(fd_found->file);
+  int size = file_length(entry->file);
   lock_release(&file_system_lock);
 
   f->eax = size;
@@ -587,23 +602,15 @@ static void read(struct intr_frame *f) {
   } else {
     // Read from file.
 
-    // Search up the fd-file mapping from the fd table.
-  	struct fd_entry fd_to_find;
-  	fd_to_find.fd = fd;
-
-  	struct hash_elem *fd_found_elem = hash_find(
-  	  &thread_current()->fd_table,
-  	  &fd_to_find.elem
-  	);
-  	if (fd_found_elem == NULL) {
+    struct fd_entry *entry = get_fd_entry(fd);
+    if (entry == NULL) {
       f->eax = SYSCALL_ERROR_CODE;
       return;
-  	}
-  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+    }
 
     // Initialise the current state of reading the file to the buffer.
     struct file_read_state state;
-    state.file = fd_found->file;
+    state.file = entry->file;
     state.eof_reached = false;
     state.bytes_read = 0;
 
@@ -694,18 +701,12 @@ static void write(struct intr_frame *f) {
   } else {
     // Write to file
 
-    // Search up the fd-file mapping from the fd table.
-  	struct fd_entry fd_to_find;
-  	fd_to_find.fd = fd;
-  	struct hash_elem *fd_found_elem = hash_find(
-  	  &thread_current()->fd_table,
-  	  &fd_to_find.elem
-  	);
-    exit_if_null(fd_found_elem);
-  	struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+    // Get the FD entry, error if there is none
+    struct fd_entry *entry = get_fd_entry(fd);
+    exit_if_null(entry);
 
     lock_acquire(&file_system_lock);
-    int bytes_written = file_write(fd_found->file, buffer, size);
+    int bytes_written = file_write(entry->file, buffer, size);
     lock_release(&file_system_lock);
 
     f->eax = bytes_written;
@@ -723,18 +724,12 @@ static void seek(struct intr_frame *f) {
     unsigned, position
   );
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  exit_if_null(fd_found_elem);
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_null(entry);
 
   lock_acquire(&file_system_lock);
-  file_seek(fd_found->file, position);
+  file_seek(entry->file, position);
   lock_release(&file_system_lock);
 }
 
@@ -746,18 +741,12 @@ static void tell(struct intr_frame *f) {
   // unsigned tell(int fd)
   ONE_ARG(int, fd);
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  exit_if_null(fd_found_elem);
-  struct fd_entry *fd_found = hash_entry(fd_found_elem, struct fd_entry, elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_null(entry);
 
   lock_acquire(&file_system_lock);
-  unsigned position = file_tell(fd_found->file);
+  unsigned position = file_tell(entry->file);
   lock_release(&file_system_lock);
 
   f->eax = position;
@@ -771,18 +760,13 @@ static void close(struct intr_frame *f UNUSED) {
   // void close(int fd)
   ONE_ARG(int, fd);
 
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-  exit_if_null(fd_found_elem);
+  // Get the FD entry, error if there is none
+  struct fd_entry *entry = get_fd_entry(fd);
+  exit_if_null(entry);
 
   // close file, free it, delete from fd_table.
-  hash_delete(&thread_current()->fd_table, fd_found_elem);
-  close_file(fd_found_elem, NULL);
+  hash_delete(&thread_current()->fd_table, &entry->elem);
+  close_file(&entry->elem, NULL);
 }
 
 /**
