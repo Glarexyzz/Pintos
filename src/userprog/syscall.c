@@ -26,15 +26,12 @@
   type name;                                                 \
   void *start ## number ## _kernel = (void *) &name;         \
   /* copy argument, which may be on separate pages */        \
-  if (!memory_pages_foreach(                                 \
+  exit_if_false (memory_pages_foreach(                       \
     arg ## number ## _,                                      \
     sizeof(type),                                            \
     &page_copy,                                              \
     (void *) &start ## number ## _kernel                     \
-  )) {                                                       \
-    exit_user_process(ERROR_STATUS_CODE);                    \
-    NOT_REACHED();                                           \
-  }
+  ));
 
 /**
  * Get one argument from the interrupt frame.
@@ -128,7 +125,7 @@ struct file_read_state {
   bool eof_reached;
 };
 
-static void exit_if_null(const void *ptr);
+static void exit_if_false(bool cond);
 
 static bool memory_pages_foreach(
   void *user_address,
@@ -197,12 +194,12 @@ syscall_init (void)
 }
 
 /**
- * Exit the user process with an error status if the provided pointer is NULL.
- * @param ptr The pointer to check.
- * @remark Will not return if the pointer is NULL.
+ * Exit the user process with an error status if the condition is false.
+ * @param cond The condition to check.
+ * @remark Will not return if the condition is false.
  */
-static inline void exit_if_null(const void *ptr) {
-  if (ptr == NULL) {
+static inline void exit_if_false(bool cond) {
+  if (!cond) {
     exit_user_process(ERROR_STATUS_CODE);
     NOT_REACHED();
   }
@@ -446,7 +443,7 @@ static void exec(struct intr_frame *f) {
   ONE_ARG(char *, cmd_line);
 
   char *physical_cmd_line = get_kernel_address(cmd_line);
-  exit_if_null(physical_cmd_line);
+  exit_if_false(physical_cmd_line != NULL);
 
   f->eax = process_execute(physical_cmd_line);
 }
@@ -473,7 +470,7 @@ static void create(struct intr_frame *f) {
   );
 
   const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_null(physical_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_create(physical_filename, initial_size);
@@ -491,7 +488,7 @@ static void remove_handler(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_null(physical_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   bool success = filesys_remove(physical_filename);
@@ -511,7 +508,7 @@ static void open(struct intr_frame *f) {
   struct thread *cur_thread = thread_current();
 
   const char *physical_filename = get_kernel_address(user_filename);
-  exit_if_null(physical_filename);
+  exit_if_false(physical_filename != NULL);
 
   lock_acquire(&file_system_lock);
   struct file *new_file = filesys_open(physical_filename);
@@ -549,7 +546,7 @@ static void filesize(struct intr_frame *f) {
 
   // Get the FD entry, error if there is none
   struct fd_entry *entry = get_fd_entry(fd);
-  exit_if_null(entry);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
   int size = file_length(entry->file);
@@ -577,10 +574,7 @@ static void read(struct intr_frame *f) {
     lock_acquire(&console_lock);
     bool success = memory_pages_foreach(buffer, size, &page_console_read, NULL);
     lock_release(&console_lock);
-    if (!success) {
-      exit_user_process(ERROR_STATUS_CODE);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
     // Given the original memory is valid, we will record all `size` bytes
     // from stdin.
     bytes_read = size;
@@ -602,10 +596,7 @@ static void read(struct intr_frame *f) {
     lock_acquire(&file_system_lock);
     bool success = memory_pages_foreach(buffer, size, &page_file_read, &state);
     lock_release(&file_system_lock);
-    if (!success) {
-      exit_user_process(ERROR_STATUS_CODE);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
 
     bytes_read = state.bytes_read;
   }
@@ -625,7 +616,7 @@ static void write(struct intr_frame *f) {
   );
 
   const char *buffer = get_kernel_address(user_buffer);
-  exit_if_null(buffer);
+  exit_if_false(buffer != NULL);
 
   // If we don't own the buffer's memory, the operation is invalid.
   if (!user_owns_memory_range(user_buffer, size)) {
@@ -644,10 +635,7 @@ static void write(struct intr_frame *f) {
       NULL
     );
     lock_release(&console_lock);
-    if (!success) {
-      exit_user_process(ERROR_STATUS_CODE);
-      NOT_REACHED();
-    }
+    exit_if_false(success);
     // Given the original memory is valid, putbuf will succeed
     // so all bytes will have been written.
     f->eax = size;
@@ -656,7 +644,7 @@ static void write(struct intr_frame *f) {
 
     // Get the FD entry, error if there is none
     struct fd_entry *entry = get_fd_entry(fd);
-    exit_if_null(entry);
+    exit_if_false(entry != NULL);
 
     lock_acquire(&file_system_lock);
     int bytes_written = file_write(entry->file, buffer, size);
@@ -679,7 +667,7 @@ static void seek(struct intr_frame *f) {
 
   // Get the FD entry, error if there is none
   struct fd_entry *entry = get_fd_entry(fd);
-  exit_if_null(entry);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
   file_seek(entry->file, position);
@@ -696,7 +684,7 @@ static void tell(struct intr_frame *f) {
 
   // Get the FD entry, error if there is none
   struct fd_entry *entry = get_fd_entry(fd);
-  exit_if_null(entry);
+  exit_if_false(entry != NULL);
 
   lock_acquire(&file_system_lock);
   unsigned position = file_tell(entry->file);
@@ -715,7 +703,7 @@ static void close(struct intr_frame *f UNUSED) {
 
   // Get the FD entry, error if there is none
   struct fd_entry *entry = get_fd_entry(fd);
-  exit_if_null(entry);
+  exit_if_false(entry != NULL);
 
   // close file, free it, delete from fd_table.
   hash_delete(&thread_current()->fd_table, &entry->elem);
@@ -732,14 +720,12 @@ syscall_handler (struct intr_frame *f)
   uint32_t *syscall_no_addr = f->esp;
 
   uint32_t *physical_syscall_no_addr = get_kernel_address(syscall_no_addr);
-  exit_if_null(physical_syscall_no_addr);
+  exit_if_false(physical_syscall_no_addr != NULL);
 
   uint32_t syscall_no = *physical_syscall_no_addr;
 
-  if (syscall_no >= sizeof(syscall_handlers) / sizeof(syscall_handler_func)) {
-    exit_user_process(ERROR_STATUS_CODE);
-    NOT_REACHED();
-  }
+  exit_if_false(syscall_no <
+                sizeof(syscall_handlers) / sizeof(syscall_handler_func));
 
   (*syscall_handlers[syscall_no])(f);
 }
