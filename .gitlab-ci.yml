@@ -47,6 +47,7 @@ test-task-2:
     - if: '$CI_COMMIT_BRANCH == "master"'
       when: on_success
       allow_failure: false
+  resource_group: test-tasks
   tags:
     - pintos-runner
 
@@ -69,6 +70,7 @@ test-task-1:
     - if: '$CI_COMMIT_BRANCH == "master"'
       when: on_success
       allow_failure: false
+  resource_group: test-tasks
   tags:
     - pintos-runner
 
@@ -91,5 +93,6 @@ test-task-0:
     - if: '$CI_COMMIT_BRANCH == "master"'
       when: on_success
       allow_failure: false
+  resource_group: test-tasks
   tags:
     - pintos-runner
