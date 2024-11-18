@@ -36,6 +36,8 @@ test-task-2:
   script:
     - source .env    # Load the environment variables
     - cd src/userprog
+    - make
+    - cd build
     - make check | tee check_output.log
     - if grep -q "FAIL" check_output.log; then echo "Failure."; exit 1; fi
   rules:
@@ -52,10 +54,12 @@ test-task-2:
 test-task-1:
   stage: test
   dependencies:
-    - build-pintos
+    - test-task-2
   script:
     - source .env    # Load the environment variables
     - cd src/threads
+    - make
+    - cd build
     - make check | tee check_output.log
     - if grep -q "FAIL" check_output.log; then echo "Failure."; exit 1; fi
   rules:
@@ -72,10 +76,12 @@ test-task-1:
 test-task-0:
   stage: test
   dependencies:
-    - build-pintos
+    - test-task-1
   script:
     - source .env    # Load the environment variables
     - cd src/devices
+    - make
+    - cd build
     - make check | tee check_output.log
     - if grep -q "FAIL" check_output.log; then echo "Failure."; exit 1; fi
   rules:
