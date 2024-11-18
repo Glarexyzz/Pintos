@@ -54,7 +54,7 @@ test-task-2:
 test-task-1:
   stage: test
   dependencies:
-    - test-task-2
+    - build-pintos
   script:
     - source .env    # Load the environment variables
     - cd src/threads
@@ -76,7 +76,7 @@ test-task-1:
 test-task-0:
   stage: test
   dependencies:
-    - test-task-1
+    - build-pintos
   script:
     - source .env    # Load the environment variables
     - cd src/devices
