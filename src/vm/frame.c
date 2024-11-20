@@ -12,3 +12,52 @@ struct owner {
 struct hash frame_table;
 /// The lock for the frame table
 struct lock frame_table_lock;
+
+static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED);
+static bool frame_kvaddr_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
+
+
+/**
+ * A hash_hash_func for frame struct.
+ * @param element The pointer to the hash_elem in the frame struct.
+ * @param aux Unused.
+ * @return The hash of the frame.
+ */
+static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED) {
+  void *kvaddr = hash_entry(element, struct frame, table_elem)->kvaddr;
+  return hash_bytes(kvaddr, sizeof (void *));
+}
+
+/**
+ * A hash_less_func for frame struct.
+ * @param a The pointer to the hash_elem in the first frame struct.
+ * @param b The pointer to the hash_elem in the second frame struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ */
+static bool frame_kvaddr_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  void *a_kvaddr = hash_entry(a, struct frame, table_elem)->kvaddr;
+  void *b_kvaddr = hash_entry(b, struct frame, table_elem)->kvaddr;
+  return a_kvaddr < b_kvaddr;
+}
+
+void frame_table_init() {
+  bool success = hash_init(
+    &frame_table,
+    &frame_hash,
+    &frame_kvaddr_smaller,
+    NULL
+  );
+  if (!success) {
+    PANIC("Could not initialise frame table!");
+  }
+  lock_init(&frame_table_lock);
+}

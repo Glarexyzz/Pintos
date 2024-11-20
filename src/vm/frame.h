@@ -16,4 +16,6 @@ struct frame {
 struct hash frame_table;
 struct lock frame_table_lock;
 
+void frame_table_init(void);
+
 #endif /* vm/frame.h */

@@ -33,6 +33,7 @@
 #endif
 #ifdef VM
 #include "devices/swap.h"
+#include "vm/frame.h"
 #endif
 #ifdef FILESYS
 #include "devices/block.h"
@@ -118,6 +119,10 @@ main (void)
   user_process_hashmap_init();
   file_system_lock_init();
   syscall_init ();
+#endif
+
+#ifdef VM
+  frame_table_init();
 #endif
 
   /* Start thread scheduler and enable interrupts. */
