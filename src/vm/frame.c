@@ -1,6 +1,5 @@
 #include "vm/frame.h"
 #include "threads/malloc.h"
-#include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
 
@@ -85,6 +84,8 @@ void *user_get_page(enum palloc_flags flags) {
     PANIC("No free pages!");
   }
 
+#ifdef VM
+
   // Initialise the page
   struct frame *new_frame = malloc(sizeof (struct frame));
   if (new_frame == NULL) {
@@ -105,6 +106,8 @@ void *user_get_page(enum palloc_flags flags) {
   lock_acquire(&frame_table_lock);
   hash_insert(&frame_table, &new_frame->table_elem);
   lock_release(&frame_table_lock);
+
+#endif
 
   return kvaddr;
 }
@@ -128,10 +131,16 @@ void user_free_page(void *page) {
   frame_to_find.kvaddr = page;
 
   lock_acquire(&frame_table_lock);
-  struct frame *found_frame = hash_entry(hash_find(
+  struct hash_elem *found_frame_elem = hash_find(
     &frame_table,
     &frame_to_find.table_elem
-  ), struct frame, table_elem);
+  );
+  ASSERT(found_frame_elem != NULL);
+  struct frame *found_frame = hash_entry(
+    found_frame_elem,
+    struct frame,
+    table_elem
+  );
 
   // Iterate through the frame's owners
   for (
@@ -142,7 +151,7 @@ void user_free_page(void *page) {
 
     // If the current owner is the current thread
     struct owner *cur_owner = list_entry(cur_elem, struct owner, elem);
-    if (cur_owner->process->tid == cur_thread->tid) {\
+    if (cur_owner->process->tid == cur_thread->tid) {
 
       // Remove the thread from the frame's owners
       list_remove(cur_elem);

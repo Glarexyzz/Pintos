@@ -4,6 +4,7 @@
 #include <hash.h>
 #include <list.h>
 #include "threads/palloc.h"
+#include "threads/synch.h"
 
 /// Item to insert into the frame table
 struct frame {
