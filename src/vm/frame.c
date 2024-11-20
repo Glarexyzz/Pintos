@@ -107,3 +107,50 @@ void *user_get_page() {
 
   return kvaddr;
 }
+
+/**
+ * Frees a page from the user pool.
+ * @param page The page to free.
+ * @pre The caller is a user process.
+ * @remark Also updates the frame table.
+ */
+void user_free_page(void *page) {
+  struct thread *cur_thread = thread_current();
+  ASSERT(cur_thread->is_user);
+
+  palloc_free_page(page);
+
+#ifdef VM
+
+  // Find and update the frame in the frame table
+  struct frame frame_to_find;
+  frame_to_find.kvaddr = page;
+
+  lock_acquire(&frame_table_lock);
+  struct frame *found_frame = hash_entry(hash_find(
+    &frame_table,
+    &frame_to_find.table_elem
+  ), struct frame, table_elem);
+
+  // Iterate through the frame's owners
+  for (
+    struct list_elem *cur_elem = list_begin(&found_frame->owners);
+    cur_elem != list_end(&found_frame->owners);
+    cur_elem = list_next(cur_elem)
+  ) {
+
+    // If the current owner is the current thread
+    struct owner *cur_owner = list_entry(cur_elem, struct owner, elem);
+    if (cur_owner->process->tid == cur_thread->tid) {\
+
+      // Remove the thread from the frame's owners
+      list_remove(cur_elem);
+      free(cur_owner);
+      break;
+    }
+  }
+
+  lock_release(&frame_table_lock);
+
+#endif
+}
