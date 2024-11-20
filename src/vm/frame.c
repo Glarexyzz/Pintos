@@ -49,6 +49,10 @@ static bool frame_kvaddr_smaller(
   return a_kvaddr < b_kvaddr;
 }
 
+/**
+ * Initialise the frame table and frame table lock.
+ * @remark Panics the kernel if initialisation fails.
+ */
 void frame_table_init() {
   bool success = hash_init(
     &frame_table,
