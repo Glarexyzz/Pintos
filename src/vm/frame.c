@@ -75,7 +75,8 @@ void frame_table_init() {
  * @remark Also updates the frame table.
  */
 void *user_get_page() {
-  ASSERT(thread_current()->is_user);
+  struct thread *cur_thread = thread_current();
+  ASSERT(cur_thread->is_user);
 
   // Get the kernel virtual address
   void *kvaddr = palloc_get_page(PAL_USER);
@@ -90,6 +91,14 @@ void *user_get_page() {
   }
   new_frame->kvaddr = kvaddr;
   list_init(&new_frame->owners);
+
+  // Add the current process to the new frame's list of owners
+  struct owner *new_frame_owner = malloc(sizeof (struct owner));
+  if (new_frame_owner == NULL) {
+    PANIC("Kernel out of memory!");
+  }
+  new_frame_owner->process = cur_thread;
+  list_push_front(&new_frame->owners, &new_frame_owner->elem);
 
   // Insert the page into the page table
   lock_acquire(&frame_table_lock);
