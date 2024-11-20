@@ -1,6 +1,9 @@
 #include "vm/frame.h"
+#include "threads/malloc.h"
+#include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "userprog/pagedir.h"
 
 /// The item to be inserted into the frame struct's owners list
 struct owner {
@@ -64,4 +67,34 @@ void frame_table_init() {
     PANIC("Could not initialise frame table!");
   }
   lock_init(&frame_table_lock);
+}
+
+/**
+ * Obtain a page from the user pool.
+ * @return The kernel virtual address for the page.
+ * @remark Also updates the frame table.
+ */
+void *user_get_page() {
+  ASSERT(thread_current()->is_user);
+
+  // Get the kernel virtual address
+  void *kvaddr = palloc_get_page(PAL_USER);
+  if (kvaddr == NULL) {
+    PANIC("No free pages!");
+  }
+
+  // Initialise the page
+  struct frame *new_frame = malloc(sizeof (struct frame));
+  if (new_frame == NULL) {
+    PANIC("Kernel out of memory!");
+  }
+  new_frame->kvaddr = kvaddr;
+  list_init(&new_frame->owners);
+
+  // Insert the page into the page table
+  lock_acquire(&frame_table_lock);
+  hash_insert(&frame_table, &new_frame->table_elem);
+  lock_release(&frame_table_lock);
+
+  return kvaddr;
 }
