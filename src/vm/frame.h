@@ -17,5 +17,7 @@ struct hash frame_table;
 struct lock frame_table_lock;
 
 void frame_table_init(void);
+void *user_get_page(void);
+void user_free_page(void *page);
 
 #endif /* vm/frame.h */
