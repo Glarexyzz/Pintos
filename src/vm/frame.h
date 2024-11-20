@@ -3,6 +3,7 @@
 
 #include <hash.h>
 #include <list.h>
+#include "threads/palloc.h"
 
 /// Item to insert into the frame table
 struct frame {
@@ -17,7 +18,7 @@ struct hash frame_table;
 struct lock frame_table_lock;
 
 void frame_table_init(void);
-void *user_get_page(void);
+void *user_get_page(enum palloc_flags flags);
 void user_free_page(void *page);
 
 #endif /* vm/frame.h */

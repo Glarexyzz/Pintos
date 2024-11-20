@@ -1,6 +1,5 @@
 #include "vm/frame.h"
 #include "threads/malloc.h"
-#include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
@@ -71,16 +70,17 @@ void frame_table_init() {
 
 /**
  * Obtain a page from the user pool.
+ * @param flags The flags for the palloc_get_page call.
  * @return The kernel virtual address for the page.
  * @pre The caller is a user process.
  * @remark Also updates the frame table.
  */
-void *user_get_page() {
+void *user_get_page(enum palloc_flags flags) {
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
   // Get the kernel virtual address
-  void *kvaddr = palloc_get_page(PAL_USER);
+  void *kvaddr = palloc_get_page(PAL_USER | flags);
   if (kvaddr == NULL) {
     PANIC("No free pages!");
   }
