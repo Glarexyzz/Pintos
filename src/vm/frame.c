@@ -72,6 +72,7 @@ void frame_table_init() {
 /**
  * Obtain a page from the user pool.
  * @return The kernel virtual address for the page.
+ * @pre The caller is a user process.
  * @remark Also updates the frame table.
  */
 void *user_get_page() {
