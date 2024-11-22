@@ -66,13 +66,12 @@ test-task-2:
   rules:
     # Run this job when there is an open MR to master or on commits to branches with an open MR to master
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
     - if: '$CI_COMMIT_BRANCH == "master"'
-      when: on_success
-      allow_failure: false
   resource_group: test-tasks
   tags:
     - pintos-runner
+  when:
+    manual
 
 # Run the tests for task 1
 test-task-1:
@@ -89,13 +88,12 @@ test-task-1:
   rules:
     # Run this job when there is an open MR to master or on commits to branches with an open MR to master
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
     - if: '$CI_COMMIT_BRANCH == "master"'
-      when: on_success
-      allow_failure: false
   resource_group: test-tasks
   tags:
     - pintos-runner
+  when:
+    manual
 
 # Run the tests for task 0
 test-task-0:
@@ -112,10 +110,9 @@ test-task-0:
   rules:
     # Run this job when there is an open MR to master or on commits to branches with an open MR to master
     - if: '$CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" || $CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: manual
     - if: '$CI_COMMIT_BRANCH == "master"'
-      when: on_success
-      allow_failure: false
   resource_group: test-tasks
   tags:
     - pintos-runner
+  when:
+    manual
