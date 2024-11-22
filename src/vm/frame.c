@@ -143,6 +143,7 @@ void user_free_page(void *page) {
   );
 
   // Iterate through the frame's owners
+  bool owner_found = false;
   for (
     struct list_elem *cur_elem = list_begin(&found_frame->owners);
     cur_elem != list_end(&found_frame->owners);
@@ -154,11 +155,13 @@ void user_free_page(void *page) {
     if (cur_owner->process->tid == cur_thread->tid) {
 
       // Remove the thread from the frame's owners
+      owner_found = true;
       list_remove(cur_elem);
       free(cur_owner);
       break;
     }
   }
+  ASSERT(owner_found);
 
   lock_release(&frame_table_lock);
 
