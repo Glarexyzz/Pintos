@@ -30,7 +30,7 @@ static bool frame_kvaddr_smaller(
  */
 static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED) {
   void *kvaddr = hash_entry(element, struct frame, table_elem)->kvaddr;
-  return hash_bytes(kvaddr, sizeof (void *));
+  return hash_bytes(&kvaddr, sizeof (void *));
 }
 
 /**
