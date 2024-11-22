@@ -85,7 +85,6 @@ void *user_get_page(enum palloc_flags flags) {
   }
 
 #ifdef VM
-
   // Initialise the page
   struct frame *new_frame = malloc(sizeof (struct frame));
   if (new_frame == NULL) {
@@ -163,6 +162,7 @@ void user_free_page(void *page) {
   }
   ASSERT(owner_found);
 
+  hash_delete(&frame_table, found_frame_elem);
   lock_release(&frame_table_lock);
 
 #endif
