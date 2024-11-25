@@ -5,9 +5,21 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
+
+/// The number of bytes written to the stack in a PUSH instruction.
+#define PUSH_SIZE 4
+/// The number of bytes written to the stack in a PUSHA instruction.
+#define PUSHA_SIZE 32
+
+/// The maximum size of the stack in bytes.
+#define STACK_MAX 0x00400000 // 2^22 = 4MB
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
+
+/// Handles stack growth using the current interrupt frame and fault address.
+static bool stack_grow(struct intr_frame *f, const void *fault_addr);
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
@@ -110,6 +122,41 @@ kill (struct intr_frame *f)
     }
 }
 
+/**
+ * Handles stack growth, attempting to allocate new stack frames as needed.
+ * @param f The current interrupt frame
+ * @param fault_addr The address which caused a page fault, and may need to
+ * grow the stack.
+ * @pre The page fault was caused by a user process.
+ * @return `true` if the stack growth amount is valid, and allocating all frames
+ * succeeded, and `false` otherwise.
+ */
+static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
+  bool stack_growth = true;
+  uintptr_t amount;
+  // Check if the address to be written/read to is in the valid range.
+  stack_growth = stack_growth && fault_addr < PHYS_BASE;
+  // For legacy reasons, allow accesses specifically at esp - PUSH/PUSHA size
+  void *normal_push_addr  = f->esp;
+  void *legacy_push_addr  = normal_push_addr - PUSH_SIZE;
+  void *legacy_pusha_addr = normal_push_addr - PUSHA_SIZE;
+  if (fault_addr == legacy_push_addr) {
+    /* Legacy PUSH. */
+    amount = PUSH_SIZE;
+  } else if (fault_addr == legacy_pusha_addr) {
+    /* Legacy PUSHA. */
+    amount = PUSHA_SIZE;
+  } else if (fault_addr >= normal_push_addr) {
+    /* Normal push. */
+    amount = (uintptr_t) (fault_addr - normal_push_addr);
+  } else {
+    stack_growth = false;
+  }
+  if (!stack_growth) return false;
+  // TODO: allocate frames for the current process.
+  return stack_growth;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to task 2 may
    also require modifying this code.
@@ -158,6 +205,9 @@ page_fault (struct intr_frame *f)
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
+  if (!user) PANIC("Kernel page fault at address %p", fault_addr);
+
+  if (!stack_grow(f, fault_addr))
+    kill (f);
 }
 
