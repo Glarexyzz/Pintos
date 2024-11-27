@@ -118,6 +118,11 @@ struct thread
                                          * descriptor number. */
 #endif
 
+#ifdef VM
+  /* Owned by vm. */
+    struct hash spt;                    /* Supplemental page table. */
+#endif
+
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };

@@ -21,7 +21,11 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#ifdef VM
 #include "vm/frame.h"
+#include "vm/page.h"
+#endif
+
 
 /// The maximum length of the name of a file that can be opened.
 #define MAX_FILENAME_LENGTH 14
@@ -774,6 +778,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+#ifdef VM
+  // Initialise supplemental page table.
+  if (!hash_init(&t->spt, &spt_entry_hash, &spt_entry_kvaddr_smaller, NULL)) {
+    goto done;
+  }
+#endif
+  
   /* Open executable file. */
   char executable_name[MAX_FILENAME_LENGTH + 1];
   copy_executable_name(file_name, executable_name);
