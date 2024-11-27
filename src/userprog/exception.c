@@ -1,3 +1,4 @@
+#include "userprog/pagedir.h"
 #include "userprog/exception.h"
 #include "userprog/process.h"
 #include <inttypes.h>
@@ -6,6 +7,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/frame.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
 #define PUSH_SIZE 4
@@ -20,6 +22,7 @@ static long long page_fault_cnt;
 
 /// Handles stack growth using the current interrupt frame and fault address.
 static bool stack_grow(struct intr_frame *f, const void *fault_addr);
+static bool access_is_stack(const void *esp, const void *addr);
 
 static void kill (struct intr_frame *);
 static void page_fault (struct intr_frame *);
@@ -123,38 +126,66 @@ kill (struct intr_frame *f)
 }
 
 /**
- * Handles stack growth, attempting to allocate new stack frames as needed.
- * @param f The current interrupt frame
+ * Checks whether a given pointer is a valid location on a stack.
+ * This does not check whether a stack frame is allocated at that location.
+ * @param esp The stack pointer.
+ * @param addr The address in memory being accessed.
+ * @return `true` if and only if the address is in the correct position with
+ * respect to the stack pointer (usually at or above the stack pointer, and
+ * below `PHYS_BASE`), so frames are allowed to be allocated to this location.
+ * @pre the stack pointer is not NULL.
+ */
+static bool access_is_stack(const void *esp, const void *addr) {
+  ASSERT(esp != NULL);
+  if (addr == NULL) {
+    // Make the NULL check explicit, although it should already be covered by
+    // the later check that addr >= PHYS_BASE - STACK_MAX.
+    return false;
+  }
+  // Check if the address to be written/read to is in the valid range,
+  // avoiding growth above the amount specified by `STACK_MAX`.
+  bool stack_growth = PHYS_BASE - STACK_MAX <= addr && is_user_vaddr(addr);
+  // For legacy reasons, allow accesses specifically at esp - PUSH/PUSHA size
+  const void *normal_push_addr  = esp;
+  const void *legacy_push_addr  = normal_push_addr - PUSH_SIZE;
+  const void *legacy_pusha_addr = normal_push_addr - PUSHA_SIZE;
+  stack_growth = stack_growth && (
+    addr >= normal_push_addr
+    || addr == legacy_push_addr
+    || addr == legacy_pusha_addr
+  );
+  return stack_growth;
+}
+
+/**
+ * Handles stack growth, attempting to allocate new stack pages as needed.
+ * @param f The current interrupt frame.
  * @param fault_addr The address which caused a page fault, and may need to
  * grow the stack.
  * @pre The page fault was caused by a user process.
- * @return `true` if the stack growth amount is valid, and allocating all frames
+ * @return `true` if the stack growth amount is valid, and allocating the frame
  * succeeded, and `false` otherwise.
  */
 static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
-  bool stack_growth = true;
-  uintptr_t amount;
-  // Check if the address to be written/read to is in the valid range.
-  stack_growth = stack_growth && fault_addr < PHYS_BASE;
-  // For legacy reasons, allow accesses specifically at esp - PUSH/PUSHA size
-  void *normal_push_addr  = f->esp;
-  void *legacy_push_addr  = normal_push_addr - PUSH_SIZE;
-  void *legacy_pusha_addr = normal_push_addr - PUSHA_SIZE;
-  if (fault_addr == legacy_push_addr) {
-    /* Legacy PUSH. */
-    amount = PUSH_SIZE;
-  } else if (fault_addr == legacy_pusha_addr) {
-    /* Legacy PUSHA. */
-    amount = PUSHA_SIZE;
-  } else if (fault_addr >= normal_push_addr) {
-    /* Normal push. */
-    amount = (uintptr_t) (fault_addr - normal_push_addr);
-  } else {
-    stack_growth = false;
+  if (!access_is_stack(f->esp, fault_addr)) {
+    return false;
   }
-  if (!stack_growth) return false;
-  // TODO: allocate frames for the current process.
-  return stack_growth;
+  // Attempt to allocate a stack page for the current process.
+  // If allocation fails, return false to kill the process.
+  void *stack_page = user_get_page(0);
+  if (stack_page == NULL) {
+    // Could not obtain a page for the stack.
+    return false;
+  }
+  // Try to map the address to the stack
+  uint32_t *pd = thread_current()->pagedir;
+  const void *aligned_addr = pg_round_down(fault_addr);
+  ASSERT(pagedir_get_page(pd, aligned_addr) == NULL);
+  if (!pagedir_set_page(pd, (void *)aligned_addr, stack_page, true)) {
+    user_free_page(stack_page);
+    return false;
+  }
+  return true;
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
@@ -197,17 +228,15 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  if (!user) PANIC("Kernel page fault at address %p", fault_addr);
-
-  if (!stack_grow(f, fault_addr))
+  // Kill the process if we attempted to write to a read-only page,
+  // or growing the stack failed.
+  if (!(user && not_present && stack_grow(f, fault_addr))) {
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+            fault_addr,
+            not_present ? "not present" : "rights violation",
+            write ? "writing" : "reading",
+            user ? "user" : "kernel");
     kill (f);
+  }
 }
 
