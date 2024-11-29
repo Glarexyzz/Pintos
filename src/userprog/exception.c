@@ -1,13 +1,19 @@
+#include "filesys/file.h"
 #include "userprog/pagedir.h"
 #include "userprog/exception.h"
 #include "userprog/process.h"
+#include <debug.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
 #define PUSH_SIZE 4
@@ -185,6 +191,53 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
     user_free_page(stack_page);
     return false;
   }
+  return true;
+}
+
+/**
+ * Handles loading of uninitialised executable file, allocating pages
+ * and reading the executable file into them.
+ * @param fault_addr The address
+ * @return
+ */
+static bool load_uninitialised_executable(void *fault_addr) {
+  fault_addr = pg_round_down(fault_addr);
+  struct thread *cur = thread_current();
+
+  // Find the corresponding entry in the thread SPT.
+  struct spt_entry entry_to_find;
+  entry_to_find.uvaddr = fault_addr;
+
+  struct hash_elem *found_elem = hash_find(&cur->spt, &entry_to_find.elem);
+  ASSERT(found_elem != NULL);
+  struct spt_entry *found_entry = hash_entry(
+      found_elem,
+      struct spt_entry,
+      elem
+  );
+  int page_read_bytes = found_entry->exec_file.page_read_bytes;
+  int page_zero_bytes = found_entry->exec_file.page_zero_bytes;
+
+  void *kpage = user_get_page(0);
+
+  // Read the executable file into memory.
+  lock_acquire(&file_system_lock);
+  int read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+  lock_release(&file_system_lock);
+  if (read_bytes != page_read_bytes)
+    return false;
+  memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+  // Add the page to the page directory, making it read-only.
+  if (!pagedir_set_page(cur->pagedir, fault_addr, kpage, false)) {
+    user_free_page(kpage);
+    return false;
+  }
+
+  // Free up the resources used by the SPT entry.
+  hash_delete(&cur->spt, found_elem);
+  free(found_entry);
+
   return true;
 }
 
