@@ -21,6 +21,7 @@ struct spt_entry {
   void *uvaddr;             /* The user virtual address. */
   enum spt_entry_type type; /* The type of the data, used to decode the
                              * union. */
+  bool writable;            /* Whether the page is writable. */
   union {                   /* The spt_entry_type-specific data. */
     struct uninitialised_executable exec_file;
   };

@@ -972,7 +972,6 @@ static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
 {
-  // TODO: writable is unused.
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
@@ -1002,11 +1001,12 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       }
       entry->uvaddr = upage;
       entry->type = UNINITIALISED_EXECUTABLE;
+      entry->writable = writable;
       entry->exec_file.page_read_bytes = page_read_bytes;
       entry->exec_file.page_zero_bytes = page_zero_bytes;
       entry->exec_file.offset = ofs;
 
-      hash_insert(&thread_current()->spt, &entry->elem);
+      hash_insert(&t->spt, &entry->elem);
 
       /* Advance. */
       read_bytes -= page_read_bytes;

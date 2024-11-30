@@ -212,7 +212,8 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   int read_bytes = 0;
   if (page_read_bytes != 0) {
     lock_acquire(&file_system_lock);
-    int read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+    file_seek(cur->executable_file, spt_entry->exec_file.offset);
+    read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
     lock_release(&file_system_lock);
   }
   if (read_bytes != page_read_bytes)
@@ -220,10 +221,18 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
   // Add the page to the page directory, making it read-only.
-  if (!pagedir_set_page(cur->pagedir, spt_entry->uvaddr, kpage, false)) {
+  if (!pagedir_set_page(
+    cur->pagedir,
+    spt_entry->uvaddr,
+    kpage,
+    spt_entry->writable
+  )) {
     user_free_page(kpage);
     return false;
   }
+
+  hash_delete(&cur->spt, &spt_entry->elem);
+  free(spt_entry);
 
   return true;
 }
@@ -296,17 +305,16 @@ page_fault (struct intr_frame *f)
     elem
   );
 
+  // Exit if writing to a read-only page
+  if (write && !found_entry->writable) goto fail;
+
   switch (found_entry->type) {
     case UNINITIALISED_EXECUTABLE:
-      if (write) goto fail;
       if (!load_uninitialised_executable(found_entry)) goto fail;
       break;
   }
 
-  // Free up the resources used by the SPT entry.
-  hash_delete(&cur->spt, found_elem);
-  free(found_entry);
-
+  return;
 
   fail:
 
