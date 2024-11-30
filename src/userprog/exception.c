@@ -200,23 +200,11 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
  * @param fault_addr The address
  * @return
  */
-static bool load_uninitialised_executable(void *fault_addr) {
-  fault_addr = pg_round_down(fault_addr);
+static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   struct thread *cur = thread_current();
 
-  // Find the corresponding entry in the thread SPT.
-  struct spt_entry entry_to_find;
-  entry_to_find.uvaddr = fault_addr;
-
-  struct hash_elem *found_elem = hash_find(&cur->spt, &entry_to_find.elem);
-  ASSERT(found_elem != NULL);
-  struct spt_entry *found_entry = hash_entry(
-      found_elem,
-      struct spt_entry,
-      elem
-  );
-  int page_read_bytes = found_entry->exec_file.page_read_bytes;
-  int page_zero_bytes = found_entry->exec_file.page_zero_bytes;
+  int page_read_bytes = spt_entry->exec_file.page_read_bytes;
+  int page_zero_bytes = spt_entry->exec_file.page_zero_bytes;
 
   void *kpage = user_get_page(0);
 
@@ -229,14 +217,10 @@ static bool load_uninitialised_executable(void *fault_addr) {
   memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
   // Add the page to the page directory, making it read-only.
-  if (!pagedir_set_page(cur->pagedir, fault_addr, kpage, false)) {
+  if (!pagedir_set_page(cur->pagedir, spt_entry->uvaddr, kpage, false)) {
     user_free_page(kpage);
     return false;
   }
-
-  // Free up the resources used by the SPT entry.
-  hash_delete(&cur->spt, found_elem);
-  free(found_entry);
 
   return true;
 }
@@ -281,15 +265,52 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  // Kill the process if we attempted to write to a read-only page,
-  // or growing the stack failed.
-  if (!(user && not_present && stack_grow(f, fault_addr))) {
-    printf ("Page fault at %p: %s error %s page in %s context.\n",
-            fault_addr,
-            not_present ? "not present" : "rights violation",
-            write ? "writing" : "reading",
-            user ? "user" : "kernel");
-    kill (f);
-  }
-}
+  // Panic if the kernel page-faulted or writing to read-only page
+  if (!user || !not_present) goto fail;
 
+  struct thread *cur = thread_current();
+  ASSERT(cur->is_user);
+
+  // Check if the page is in the SPT
+
+  // Find the corresponding entry in the thread SPT.
+  struct spt_entry entry_to_find;
+  entry_to_find.uvaddr = pg_round_down(fault_addr);
+
+  struct hash_elem *found_elem = hash_find(&cur->spt, &entry_to_find.elem);
+
+  if (found_elem == NULL) { // The address is not in the SPT
+    // Try to grow the stack
+    if (!stack_grow(f, fault_addr)) goto fail;
+    return;
+  }
+
+  // The address is in the SPT - handle the SPT entry appropriately
+
+  struct spt_entry *found_entry = hash_entry(
+    found_elem,
+    struct spt_entry,
+    elem
+  );
+
+  switch (found_entry->type) {
+    case UNINITIALISED_EXECUTABLE:
+      if (write) goto fail;
+      load_uninitialised_executable(found_entry);
+      break;
+  }
+
+  // Free up the resources used by the SPT entry.
+  hash_delete(&cur->spt, found_elem);
+  free(found_entry);
+
+
+  fail:
+
+  printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+  kill (f);
+}
