@@ -3,10 +3,12 @@
 
 #include <debug.h>
 #include <hash.h>
+#include "filesys/off_t.h"
+#include "vm/mmap.h"
 
 /// Describes where the data referred to by the SPT is located.
 enum spt_entry_type {
-  PLACEHOLDER // TODO: Remove this
+  MMAP, // A page mapped to a part ofa file in the user's address space.
 };
 
 /// Entry for the supplemental page table.
@@ -15,6 +17,14 @@ struct spt_entry {
   enum spt_entry_type type; /* The type of the data, used to decode the
                              * union. */
   union {                   /* The spt_entry_type-specific data. */
+    // Page mapped to a file in memory.
+    struct {
+      bool dirty_bit;                /* True iff the page was written to. */
+      off_t offset;                  /* Offset of the page within the file. */
+	  struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
+	  struct list_elem elem;         /* For insertion in the list of pages
+                                        in the mmap_entry. */
+    } mmap;
   };
 
   struct hash_elem elem;    /* For insertion into the supplemental page
