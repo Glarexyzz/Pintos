@@ -209,9 +209,12 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   void *kpage = user_get_page(0);
 
   // Read the executable file into memory.
-  lock_acquire(&file_system_lock);
-  int read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
-  lock_release(&file_system_lock);
+  int read_bytes = 0;
+  if (page_read_bytes != 0) {
+    lock_acquire(&file_system_lock);
+    int read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+    lock_release(&file_system_lock);
+  }
   if (read_bytes != page_read_bytes)
     return false;
   memset(kpage + page_read_bytes, 0, page_zero_bytes);
@@ -296,7 +299,7 @@ page_fault (struct intr_frame *f)
   switch (found_entry->type) {
     case UNINITIALISED_EXECUTABLE:
       if (write) goto fail;
-      load_uninitialised_executable(found_entry);
+      if (!load_uninitialised_executable(found_entry)) goto fail;
       break;
   }
 
