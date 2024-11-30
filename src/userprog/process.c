@@ -24,6 +24,7 @@
 #ifdef VM
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/mmap.h"
 #endif
 
 
@@ -783,6 +784,21 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!hash_init(&t->spt, &spt_entry_hash, &spt_entry_kvaddr_smaller, NULL)) {
     goto done;
   }
+
+  // Initialise memory mapped file table.
+  if (
+    !hash_init(
+      &t->mmap_table,
+  	  &mmap_entry_hash,
+  	  &mmap_entry_maddr_smaller,
+  	  NULL
+	)
+  ) {
+    goto done;
+  }
+
+  // Initialise the memory-mapping descriptor counter.
+  thread_current()->mmap_id_counter = 0;
 #endif
   
   /* Open executable file. */
