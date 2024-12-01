@@ -277,7 +277,7 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  // Panic if the kernel page-faulted or writing to read-only page
+  // Kill if the kernel page-faulted or writing to read-only page
   if (!user || !not_present) goto fail;
 
   struct thread *cur = thread_current();
@@ -294,7 +294,7 @@ page_fault (struct intr_frame *f)
   if (found_elem == NULL) { // The address is not in the SPT
     // Try to grow the stack
     if (!stack_grow(f, fault_addr)) goto fail;
-    return;
+    return; // The stack grew successfully - we're done handling the page fault
   }
 
   // The address is in the SPT - handle the SPT entry appropriately
@@ -316,7 +316,7 @@ page_fault (struct intr_frame *f)
 
   return;
 
-  fail:
+ fail:
 
   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
