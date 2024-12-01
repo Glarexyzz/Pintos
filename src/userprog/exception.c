@@ -206,7 +206,7 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   int page_read_bytes = spt_entry->exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->exec_file.page_zero_bytes;
 
-  void *kpage = user_get_page(0);
+  uint8_t *kpage = user_get_page(0);
 
   // Read the executable file into memory.
   int read_bytes = 0;
