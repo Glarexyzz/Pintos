@@ -23,15 +23,9 @@
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
 #define AN_ARG(type, name, number)                           \
   void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
-  type name;                                                 \
-  void *start ## number ## _kernel = (void *) &name;         \
-  /* copy argument, which may be on separate pages */        \
-  exit_if_false (memory_pages_foreach(                       \
-    arg ## number ## _,                                      \
-    sizeof(type),                                            \
-    &page_copy,                                              \
-    (void *) &start ## number ## _kernel                     \
-  ));
+  user_owns_memory_range(arg ## number ## _, sizeof(type));  \
+  type name = *(type *)arg ## number ## _;
+
 
 /**
  * Get one argument from the interrupt frame.
@@ -134,14 +128,14 @@ struct file_write_state {
 
 static void exit_if_false(bool cond);
 
-static bool memory_pages_foreach(
-  void *user_address,
-  unsigned size,
-  page_foreach_func f,
-  void *state
+static void user_memory_pages_foreach(
+    void *user_address,
+    unsigned size,
+    page_foreach_func f,
+    void *state
 );
 
-static void *get_kernel_address(const void *uaddr);
+static void user_owns_byte(const void *uvaddr);
 static struct fd_entry *get_fd_entry(int fd);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
@@ -218,32 +212,24 @@ static inline void exit_if_false(bool cond) {
  * an array).
  * Applies the foreach function to each section of a page with the size of
  * the section of memory held in that page, and the state.
- * Fails, returning false, if the range does not map to a block of memory
- * owned by the current process.
  * Care must be taken to ensure that the foreach function does not attempt to
  * write to read-only data, if the provided memory range is also read-only.
  * @param user_address The virtual (user) address to the start of the range.
  * @param size The size of the memory range provided by the user.
  * @param f Iterator function to handle a part of the memory range in one page.
  * @param state State for the helper function to use.
- * @return `true` if and only if accessing the entire memory range succeeded.
  */
-static bool memory_pages_foreach(
+static void user_memory_pages_foreach(
   void *user_address,
   unsigned size,
   page_foreach_func f,
   void *state
 ) {
-  void *buffer = get_kernel_address(user_address);
-  if (!user_owns_memory_range(user_address, size)) {
-    return false;
-  }
-  ASSERT(buffer != NULL);
   // The trivial case, when the entire buffer fits inside the page.
-  unsigned buffer_end_offset = pg_ofs(buffer) + size - 1;
+  unsigned buffer_end_offset = pg_ofs(user_address) + size - 1;
   if (buffer_end_offset < PGSIZE) {
-    (*f)(buffer, size, state);
-    return true;
+    (*f)(user_address, size, state);
+    return;
   }
 
   // Otherwise, we have the start of the buffer reaching the end of a page,
@@ -255,7 +241,7 @@ static bool memory_pages_foreach(
   if (pg_ofs(user_address) != 0) {
     // Read the first page
     buffer_start_page_size = PGSIZE - pg_ofs(user_address);
-    (*f)(buffer, buffer_start_page_size, state);
+    (*f)(user_address, buffer_start_page_size, state);
     // Progress to the end of the page
     user_address += buffer_start_page_size;
     size -= buffer_start_page_size;
@@ -264,35 +250,30 @@ static bool memory_pages_foreach(
   // page at the end.
   while (size > 0) {
     ASSERT(pg_ofs(user_address) == 0);
-    buffer = get_kernel_address(user_address);
-    ASSERT(buffer != NULL);
     unsigned consumed = size < PGSIZE ? size : PGSIZE;
-    (*f)(buffer, consumed, state);
+    (*f)(user_address, consumed, state);
     // If the last page is reached, consumed == size.
     user_address += consumed;
     size -= consumed;
   }
-  return true;
 }
 
 /**
- * Get the kernel virtual address of a virtual user address from the page
- * directory provided.
- * @param pd The page directory from which to read.
- * @param uaddr The user address.
- * @return The physical address, or NULL if the user address is invalid.
- * @remark For safety, do not perform pointer arithmetic on the returned pointer
- * from this function.
- * @remark If NULL is returned, the caller should free its resources and call
- * exit_user_process(ERROR_STATUS_CODE).
+ * Checks if given user virtual address is owned by the caller. Terminates the
+ * user process if not.
+ * @param uvaddr The user virtual address to check.
+ * @remark This function may trigger a page fault and may kill the caller.
  */
-static void *get_kernel_address(const void *uaddr) {
-  // Return NUll if we're not accessing an address in user-space
-  if (!is_user_vaddr(uaddr)) {
-    return NULL;
+static void user_owns_byte(const void *uvaddr) {
+  // If not within the range of user virtual memory, exit the process.
+  if (!is_user_vaddr(uvaddr)) {
+    exit_user_process(ERROR_STATUS_CODE);
   }
 
-  return pagedir_get_page(thread_current()->pagedir, uaddr);
+  // Read the uaddr to initiate page fault handling if needed.
+  // If the address is not owned by the user, the page fault handler will
+  // exit the user process.
+  uint8_t read_byte = *(uint8_t *) uvaddr;
 }
 
 /**
@@ -317,41 +298,24 @@ static struct fd_entry *get_fd_entry(int fd) {
 }
 
 /**
- * Checks whether the user owns a given block of memory of a given size, that
- * starts at a given (virtual) address.
- * @param buffer The virtual address to the buffer.
- * @param size The length of the buffer that would be read from or written to.
- * @return `true` if and only if all parts of the buffer are owned by the user.
+ * Checks if a given range of user virtual memory is owned by the caller. Exit
+ * the user process if not.
+ * @param buffer_ The base address of the range of memory to check.
+ * @param size The size of the range of memory to check, in bytes.
+ * @remark This function may trigger a page fault and may kill the caller.
  */
-static bool user_owns_memory_range(const void *buffer, unsigned size) {
+static void user_owns_memory_range(const void *buffer_, unsigned size) {
   // Performing pointer arithmetic on a void* is undefined behaviour,
   // so cast to a uint8_t* to comply with the standard.
-  for (unsigned i = 0; i < size; i += PGSIZE) {
-    if (get_kernel_address(&((uint8_t *)buffer)[i]) == NULL) {
-      return false;
-    }
-  }
-  // Check the end of the buffer as well.
-  if (get_kernel_address(&((uint8_t *)buffer)[size - 1]) == NULL) {
-    return false;
-  }
-  return true;
-}
+  const uint8_t *buffer = (uint8_t *) buffer_;
 
-/**
- * Takes a pointer to a memory address, and copies `size` bytes from `page` to
- * the beginning of the address stored at `state`, also incrementing the
- * address by `size` bytes.
- * @param page The physical address at the start of the the portion of the page
- * @param size The size of the portion of the page
- * @param state The address (of type `uint8_t **`) to the value being copied
- * (and incremented).
- */
-static void page_copy(void *page, unsigned size, void *state) {
-  uint8_t **start = (uint8_t **)state;
-  ASSERT(start != NULL && *start != NULL);
-  memcpy((void *)*start, (const void *)page, (unsigned long)size);
-  *start += size;
+  for (unsigned i = 0; i < size; i += PGSIZE) {
+    user_owns_byte(buffer + i);
+  }
+  // Check the end of the buffer as well, if the buffer is larger than one page.
+  if (pg_round_down(buffer) != pg_round_down(buffer + size - 1)) {
+    user_owns_byte(buffer + size - 1);
+  }
 }
 
 /**
@@ -462,10 +426,21 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  char *kernel_cmd_line = get_kernel_address(cmd_line);
-  exit_if_false(kernel_cmd_line != NULL);
+  // We must validate the string.
+  // First we check that the string starts in user space.
+  user_owns_byte(cmd_line);
 
-  f->eax = process_execute(kernel_cmd_line);
+  // process_execute only copies PGSIZE - 1 number of bytes, so we check if
+  // it is possible that the first PGSIZE - 1 characters cross over into
+  // kernel memory.
+  if (is_kernel_vaddr(cmd_line + PGSIZE - 1)) {
+    for (int i = 1; i < (PGSIZE - 1); i++) {
+      user_owns_byte(cmd_line + i);
+      if (cmd_line[i] == '\0') break;
+    }
+  }
+
+  f->eax = process_execute(cmd_line);
 }
 
 /**
