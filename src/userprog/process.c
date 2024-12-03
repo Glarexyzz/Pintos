@@ -785,20 +785,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   }
 
-  // Initialise memory mapped file table.
-  if (
-    !hash_init(
-      &t->mmap_table,
-  	  &mmap_entry_hash,
-  	  &mmap_entry_maddr_smaller,
-  	  NULL
-	)
-  ) {
-    goto done;
-  }
-
-  // Initialise the memory-mapping descriptor counter.
-  thread_current()->mmap_id_counter = 0;
+  // TODO: Initialise mmap table
 #endif
   
   /* Open executable file. */

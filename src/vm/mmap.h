@@ -14,11 +14,4 @@ struct mmap_entry {
   struct hash_elem elem;  /* Used to insert the element into mmap_table. */
 };
 
-unsigned mmap_entry_hash(const struct hash_elem *element, void *aux UNUSED);
-bool mmap_entry_maddr_smaller(
-  const struct hash_elem *a,
-  const struct hash_elem *b,
-  void *aux UNUSED
-);
-
 #endif //MMAP_H
