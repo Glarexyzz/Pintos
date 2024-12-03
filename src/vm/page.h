@@ -20,7 +20,6 @@ struct spt_entry {
     // Page mapped to a file in memory.
     struct {
       bool dirty_bit;                /* True iff the page was written to. */
-      off_t offset;                  /* Offset of the page within the file. */
 	  struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
 	  struct list_elem elem;         /* For insertion in the list of pages
                                         in the mmap_entry. */
