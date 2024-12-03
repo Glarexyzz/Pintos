@@ -430,7 +430,7 @@ static bool user_owns_string(const char *base, int max_length) {
     user_owns_byte(base + i);
     if (base[i] == '\0') return true;
   }
-  return base[max_length - 1] == '\0';
+  return false;
 }
 
 /**
