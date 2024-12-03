@@ -471,11 +471,9 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  // Check that the user owns the whole user_filename string
-  user_owns_byte(user_filename);
-
-  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
-   exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  if (!user_owns_string(user_filename, NAME_MAX+1)) {
+    f->eax = false;
+    return;
   }
 
   lock_acquire(&file_system_lock);
@@ -494,9 +492,9 @@ static void remove_handler(struct intr_frame *f) {
   ONE_ARG(const char *, user_filename);
 
   // Check that the user owns the whole user_filename string
-  user_owns_byte(user_filename);
-  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
-    exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  if (!user_owns_string(user_filename, NAME_MAX+1)) {
+    f->eax = false;
+    return;
   }
 
   lock_acquire(&file_system_lock);
@@ -517,9 +515,9 @@ static void open(struct intr_frame *f) {
   struct thread *cur_thread = thread_current();
 
   // Check that the user owns the whole user_filename string
-  user_owns_byte(user_filename);
-  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
-    exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  if (!user_owns_string(user_filename, NAME_MAX+1)) {
+    f->eax = false;
+    return;
   }
 
   lock_acquire(&file_system_lock);
