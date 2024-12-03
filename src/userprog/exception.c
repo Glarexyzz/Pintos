@@ -14,9 +14,6 @@
 /// The number of bytes written to the stack in a PUSHA instruction.
 #define PUSHA_SIZE 32
 
-/// The maximum size of the stack in bytes.
-#define STACK_MAX 0x00400000 // 2^22 = 4MB
-
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
