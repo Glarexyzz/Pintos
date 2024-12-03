@@ -1,5 +1,6 @@
 #include "devices/input.h"
 #include "devices/shutdown.h"
+#include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "userprog/syscall.h"
@@ -129,20 +130,20 @@ struct file_write_state {
 static void exit_if_false(bool cond);
 
 static void user_memory_pages_foreach(
-    void *user_address,
-    unsigned size,
-    page_foreach_func f,
-    void *state
+  void *user_address,
+  unsigned size,
+  page_foreach_func f,
+  void *state
 );
 
 static void user_owns_byte(const void *uvaddr);
 static struct fd_entry *get_fd_entry(int fd);
-static bool user_owns_memory_range(const void *buffer, unsigned size);
+static void user_owns_memory_range(const void *buffer_, unsigned size);
+static bool user_owns_string(const char *base, int max_length);
 static void syscall_handler (struct intr_frame *);
 
 // Helper functions for reading to and writing from sections of pages.
 
-static void page_copy(void *page, unsigned size, void *state);
 static void page_print(void *page, unsigned size, void *state UNUSED);
 static void page_console_read(void *page_, unsigned size, void *state UNUSED);
 static void page_file_read(void *page, unsigned size, void *state_);
@@ -163,11 +164,6 @@ static void seek(struct intr_frame *f);
 static void tell(struct intr_frame *f);
 static void close(struct intr_frame *f);
 
-/**
- * Lock for reading to and writing from the console.
- * Unlike the built-in lock, this is not reentrant.
- */
-struct lock console_lock;
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
@@ -191,7 +187,6 @@ const syscall_handler_func syscall_handlers[] = {
 void
 syscall_init (void) 
 {
-  lock_init(&console_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -273,7 +268,7 @@ static void user_owns_byte(const void *uvaddr) {
   // Read the uaddr to initiate page fault handling if needed.
   // If the address is not owned by the user, the page fault handler will
   // exit the user process.
-  uint8_t read_byte = *(uint8_t *) uvaddr;
+  if (*(uint8_t *) uvaddr) barrier();
 }
 
 /**
@@ -369,7 +364,9 @@ static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
 static void page_file_read(void *page, unsigned size, void *state_) {
   struct file_read_state *state = (struct file_read_state *)state_;
   if (state->eof_reached) return;
+  lock_acquire(&file_system_lock);
   unsigned bytes_read = file_read(state->file, page, size);
+  lock_release(&file_system_lock);
   if (bytes_read < size) {
     // The buffer has not been fully written to, indicating we are at the
     // end of the file.
@@ -388,7 +385,9 @@ static void page_file_read(void *page, unsigned size, void *state_) {
  */
 static void page_file_write(void *page, unsigned size, void *state_) {
   struct file_write_state *state = (struct file_write_state *)state_;
+  lock_acquire(&file_system_lock);
   state->bytes_written += (unsigned)file_write(state->file, page, size);
+  lock_release(&file_system_lock);
 }
 
 /**
@@ -419,6 +418,22 @@ static void exit(struct intr_frame *f UNUSED) {
 }
 
 /**
+ * Asserts that a user owns every byte from str_base up to str_base + max_length
+ * (exclusive) or a null terminator, whichever comes first.
+ * @param base The basal pointer of the string to check.
+ * @param max_length The number of bytes to check are owned by the user.
+ * @return if the checked portion of the string is null-terminated.
+ * @remark Will exit the user process on failure.
+ */
+static bool user_owns_string(const char *base, int max_length) {
+  for (int i = 0; i < max_length; i++) {
+    user_owns_byte(base + i);
+    if (base[i] == '\0') return true;
+  }
+  return base[max_length - 1] == '\0';
+}
+
+/**
  * Handles exec system calls.
  * @param f The interrupt stack frame
  */
@@ -426,18 +441,10 @@ static void exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
-  // We must validate the string.
-  // First we check that the string starts in user space.
+  // Check that the user owns the whole cmd_line string
   user_owns_byte(cmd_line);
-
-  // process_execute only copies PGSIZE - 1 number of bytes, so we check if
-  // it is possible that the first PGSIZE - 1 characters cross over into
-  // kernel memory.
   if (is_kernel_vaddr(cmd_line + PGSIZE - 1)) {
-    for (int i = 1; i < (PGSIZE - 1); i++) {
-      user_owns_byte(cmd_line + i);
-      if (cmd_line[i] == '\0') break;
-    }
+    user_owns_string(cmd_line, PGSIZE - 1);
   }
 
   f->eax = process_execute(cmd_line);
@@ -464,11 +471,15 @@ static void create(struct intr_frame *f) {
     unsigned, initial_size
   );
 
-  const char *kernel_filename = get_kernel_address(user_filename);
-  exit_if_false(kernel_filename != NULL);
+  // Check that the user owns the whole user_filename string
+  user_owns_byte(user_filename);
+
+  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
+   exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  }
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_create(kernel_filename, initial_size);
+  bool success = filesys_create(user_filename, initial_size);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -482,11 +493,14 @@ static void remove_handler(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
-  const char *kernel_filename = get_kernel_address(user_filename);
-  exit_if_false(kernel_filename != NULL);
+  // Check that the user owns the whole user_filename string
+  user_owns_byte(user_filename);
+  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
+    exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  }
 
   lock_acquire(&file_system_lock);
-  bool success = filesys_remove(kernel_filename);
+  bool success = filesys_remove(user_filename);
   lock_release(&file_system_lock);
 
   f->eax = success;
@@ -502,11 +516,14 @@ static void open(struct intr_frame *f) {
 
   struct thread *cur_thread = thread_current();
 
-  const char *kernel_filename = get_kernel_address(user_filename);
-  exit_if_false(kernel_filename != NULL);
+  // Check that the user owns the whole user_filename string
+  user_owns_byte(user_filename);
+  if (is_kernel_vaddr(user_filename + NAME_MAX)) {
+    exit_if_false(user_owns_string(user_filename, NAME_MAX+1));
+  }
 
   lock_acquire(&file_system_lock);
-  struct file *new_file = filesys_open(kernel_filename);
+  struct file *new_file = filesys_open(user_filename);
   lock_release(&file_system_lock);
 
   if (new_file == NULL) {
@@ -565,11 +582,9 @@ static void read(struct intr_frame *f) {
   int bytes_read;
 
   if (fd == STDIN_FD) {
+    user_owns_memory_range(buffer, size);
     // Read from the console.
-    lock_acquire(&console_lock);
-    bool success = memory_pages_foreach(buffer, size, &page_console_read, NULL);
-    lock_release(&console_lock);
-    exit_if_false(success);
+    user_memory_pages_foreach(buffer, size, &page_console_read, NULL);
     // Given the original memory is valid, we will record all `size` bytes
     // from stdin.
     bytes_read = size;
@@ -588,10 +603,10 @@ static void read(struct intr_frame *f) {
     state.eof_reached = false;
     state.bytes_read = 0;
 
-    lock_acquire(&file_system_lock);
-    bool success = memory_pages_foreach(buffer, size, &page_file_read, &state);
-    lock_release(&file_system_lock);
-    exit_if_false(success);
+//    const char *s = pagedir_get_page(thread_current()->pagedir, buffer);
+//    printf("Via pd: %p = %s", s, s);
+    user_owns_memory_range(buffer, size);
+    user_memory_pages_foreach(buffer, size, &page_file_read, &state);
 
     bytes_read = state.bytes_read;
   }
@@ -610,44 +625,33 @@ static void write(struct intr_frame *f) {
     unsigned, size
   );
 
+  user_owns_memory_range(buffer, size);
+
   if (fd == STDOUT_FD) {
     // Console write
 
-    lock_acquire(&console_lock);
-    bool success = memory_pages_foreach(
-      (void *)buffer,
-      size,
-      &page_print,
-      NULL
-    );
-    lock_release(&console_lock);
-    exit_if_false(success);
+    user_memory_pages_foreach((void *)buffer, size, &page_print, NULL);
     // Given the original memory is valid, putbuf will succeed
     // so all bytes will have been written.
     f->eax = size;
   } else {
     // Write to file
 
-    // Get the FD entry, error if there is none
+    // Get the FD entry, return 0 if there is none.
     struct fd_entry *entry = get_fd_entry(fd);
-    exit_if_false(entry != NULL);
+    if (entry == NULL) {
+      f->eax = 0;
+      return;
+    }
 
     // Initialise the current state of writing to the file from the buffer.
     struct file_write_state state;
     state.file = entry->file;
     state.bytes_written = 0;
 
-    lock_acquire(&file_system_lock);
     // The iterator will check the user-provided buffer.
     // If it is invalid, no copying will take place.
-    bool success = memory_pages_foreach(
-      (void *)buffer,
-      size,
-      &page_file_write,
-      &state
-    );
-    lock_release(&file_system_lock);
-    exit_if_false(success);
+    user_memory_pages_foreach((void *)buffer, size, &page_file_write, &state);
 
     f->eax = state.bytes_written;
   }
@@ -716,12 +720,7 @@ static void close(struct intr_frame *f UNUSED) {
 static void
 syscall_handler (struct intr_frame *f)
 {
-  uint32_t *syscall_no_addr = f->esp;
-
-  uint32_t *kernel_syscall_no_addr = get_kernel_address(syscall_no_addr);
-  exit_if_false(kernel_syscall_no_addr != NULL);
-
-  uint32_t syscall_no = *kernel_syscall_no_addr;
+  AN_ARG(uint32_t, syscall_no, 0);
 
   exit_if_false(syscall_no <
                 sizeof(syscall_handlers) / sizeof(syscall_handler_func));

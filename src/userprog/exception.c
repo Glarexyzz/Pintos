@@ -277,10 +277,11 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  // Kill if the kernel page-faulted or writing to read-only page
-  if (!user || !not_present) goto fail;
-
   struct thread *cur = thread_current();
+
+  // Kill if the kernel page-faulted or writing to read-only page
+  if (!(cur->is_user) || !not_present) goto fail;
+
   ASSERT(cur->is_user);
 
   // Check if the page is in the SPT
@@ -318,10 +319,14 @@ page_fault (struct intr_frame *f)
 
  fail:
 
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+  if (thread_current()->is_user) {
+    exit_user_process(ERROR_STATUS_CODE);
+  } else {
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+            fault_addr,
+            not_present ? "not present" : "rights violation",
+            write ? "writing" : "reading",
+            user ? "user" : "kernel");
+    thread_exit();
+  }
 }
