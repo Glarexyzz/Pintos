@@ -601,8 +601,6 @@ static void read(struct intr_frame *f) {
     state.eof_reached = false;
     state.bytes_read = 0;
 
-//    const char *s = pagedir_get_page(thread_current()->pagedir, buffer);
-//    printf("Via pd: %p = %s", s, s);
     user_owns_memory_range(buffer, size);
     user_memory_pages_foreach(buffer, size, &page_file_read, &state);
 
