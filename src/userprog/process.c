@@ -1082,3 +1082,24 @@ install_page (void *upage, void *kpage, bool writable)
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 }
+
+/**
+ * Fetches an FD entry from the current thread's FD table.
+ * @param fd The FD number.
+ * @return A pointer to the FD entry, or NULL if there is no entry for the FD
+ * number.
+ */
+struct fd_entry *get_fd_entry(int fd) {
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  struct hash_elem *fd_found_elem = hash_find(
+      &thread_current()->fd_table,
+      &fd_to_find.elem
+  );
+
+  if (fd_found_elem == NULL) return NULL;
+
+  return hash_entry(fd_found_elem, struct fd_entry, elem);
+}

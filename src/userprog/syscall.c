@@ -142,7 +142,6 @@ static bool memory_pages_foreach(
 );
 
 static void *get_kernel_address(const void *uaddr);
-static struct fd_entry *get_fd_entry(int fd);
 static bool user_owns_memory_range(const void *buffer, unsigned size);
 static void syscall_handler (struct intr_frame *);
 
@@ -293,27 +292,6 @@ static void *get_kernel_address(const void *uaddr) {
   }
 
   return pagedir_get_page(thread_current()->pagedir, uaddr);
-}
-
-/**
- * Fetches an FD entry from the current thread's FD table.
- * @param fd The FD number.
- * @return A pointer to the FD entry, or NULL if there is no entry for the FD
- * number.
- */
-static struct fd_entry *get_fd_entry(int fd) {
-  // Search up the fd-file mapping from the fd table.
-  struct fd_entry fd_to_find;
-  fd_to_find.fd = fd;
-
-  struct hash_elem *fd_found_elem = hash_find(
-    &thread_current()->fd_table,
-    &fd_to_find.elem
-  );
-
-  if (fd_found_elem == NULL) return NULL;
-
-  return hash_entry(fd_found_elem, struct fd_entry, elem);
 }
 
 /**
