@@ -8,8 +8,8 @@
 
 struct mmap_entry {
   mapid_t mapping_id;     /* The identifier for the map entry. */
-  struct file *file;      /* The structrue of the actual file. */
-  const void *maddr;      /* The address to map the file to. */
+  struct file *file;      /* The structure of the actual file. */
+  const void *maddr;      /* The basal address to map the file to. */
   struct list pages;      /* List of pages currently mapped to the file. */
   struct hash_elem elem;  /* Used to insert the element into mmap_table. */
 };
