@@ -6,6 +6,10 @@
 #include <user/syscall.h>
 #include "filesys/file.h"
 
+/// A pointer to a supplemental page table entry.
+/// Necessary to avoid circular dependencies with page.h
+typedef struct spt_entry *spt_entry_ptr;
+
 struct mmap_entry {
   mapid_t mapping_id;     /* The identifier for the map entry. */
   struct file *file;      /* The structure of the actual file. */
