@@ -214,7 +214,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
   entry->mapping_id = mapping_id;
   // Insert into the memory mapping table.
   struct hash_elem *prev = hash_insert(get_mmap_table(), &entry->elem);
-  ASSERT(prev != NULL);
+  ASSERT(prev == NULL);
   return mapping_id;
 }
 
