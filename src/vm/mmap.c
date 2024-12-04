@@ -351,7 +351,9 @@ static void free_mmap_elem(
   struct mmap_entry *mmap_entry = from_hash_elem(mmap_hash_elem);
   // Remove all the mapped pages, close the file, and free the entry.
   remove_spt_entries(&mmap_entry->pages);
+  lock_acquire(&file_system_lock);
   file_close(mmap_entry->file);
+  lock_release(&file_system_lock);
   free(mmap_entry);
 }
 
