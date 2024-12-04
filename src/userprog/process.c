@@ -591,6 +591,9 @@ void exit_user_process(int status) {
 
   lock_release(&user_processes_lock);
 
+  // Destroy the memory-mapped file table.
+  mmap_destroy();
+
   // Close all the files and free all the file descriptors,
   // and the file descriptor table
   hash_destroy(&cur_thread->fd_table, &close_file);
