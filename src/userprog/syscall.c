@@ -23,9 +23,9 @@
 #define STDOUT_FD 1
 
 // Helper macro for ONE_ARG, TWO_ARG, and THREE_ARG
-#define AN_ARG(type, name, number)                           \
-  void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;  \
-  user_owns_memory_range(arg ## number ## _, sizeof(type));  \
+#define AN_ARG(type, name, number)                                  \
+  void *arg ## number ## _ = ((uintptr_t *) f->esp)+number;         \
+  user_owns_memory_range(arg ## number ## _, sizeof(type), false);  \
   type name = *(type *)arg ## number ## _;
 
 
@@ -137,8 +137,12 @@ static void user_memory_pages_foreach(
   void *state
 );
 
-static void user_owns_byte(const void *uvaddr);
-static void user_owns_memory_range(const void *buffer_, unsigned size);
+static void user_owns_byte(void *uvaddr, bool write);
+static void user_owns_memory_range(
+  void *buffer_,
+  unsigned size,
+  bool write
+);
 static bool user_owns_string(const char *base, int max_length);
 static void syscall_handler (struct intr_frame *);
 
@@ -257,18 +261,24 @@ static void user_memory_pages_foreach(
  * Checks if given user virtual address is owned by the caller. Terminates the
  * user process if not.
  * @param uvaddr The user virtual address to check.
+ * @param write Whether the access would be a write.
  * @remark This function may trigger a page fault and may kill the caller.
  */
-static void user_owns_byte(const void *uvaddr) {
+static void user_owns_byte(void *uvaddr, bool write) {
   // If not within the range of user virtual memory, exit the process.
   if (!is_user_vaddr(uvaddr)) {
     exit_user_process(ERROR_STATUS_CODE);
   }
 
-  // Read the uaddr to initiate page fault handling if needed.
+  // Read (and potentially write) to the uaddr to initiate page fault handling
+  // if needed.
   // If the address is not owned by the user, the page fault handler will
   // exit the user process.
-  if (*(uint8_t *) uvaddr) barrier();
+  uint8_t byte = *(uint8_t *)uvaddr;
+  barrier();
+  if (write) {
+    *(uint8_t *) uvaddr = byte;
+  }
 }
 
 /**
@@ -276,19 +286,25 @@ static void user_owns_byte(const void *uvaddr) {
  * the user process if not.
  * @param buffer_ The base address of the range of memory to check.
  * @param size The size of the range of memory to check, in bytes.
+ * @param write To specify whether we are checking to write to the page,
+ * or only read.
  * @remark This function may trigger a page fault and may kill the caller.
  */
-static void user_owns_memory_range(const void *buffer_, unsigned size) {
+static void user_owns_memory_range(
+  void *buffer_,
+  unsigned size,
+  bool write
+) {
   // Performing pointer arithmetic on a void* is undefined behaviour,
   // so cast to a uint8_t* to comply with the standard.
-  const uint8_t *buffer = (uint8_t *) buffer_;
+  uint8_t *buffer = (uint8_t *) buffer_;
 
   for (unsigned i = 0; i < size; i += PGSIZE) {
-    user_owns_byte(buffer + i);
+    user_owns_byte(buffer + i, write);
   }
   // Check the end of the buffer as well, if the buffer is larger than one page.
   if (pg_round_down(buffer) != pg_round_down(buffer + size - 1)) {
-    user_owns_byte(buffer + size - 1);
+    user_owns_byte(buffer + size - 1, write);
   }
 }
 
@@ -398,7 +414,7 @@ static void syscall_exit(struct intr_frame *f) {
  */
 static bool user_owns_string(const char *base, int max_length) {
   for (int i = 0; i < max_length; i++) {
-    user_owns_byte(base + i);
+    user_owns_byte((void *)base + i, false);
     if (base[i] == '\0') return true;
   }
   return false;
@@ -413,7 +429,7 @@ static void syscall_exec(struct intr_frame *f) {
   ONE_ARG(char *, cmd_line);
 
   // Check that the user owns the whole cmd_line string
-  user_owns_byte(cmd_line);
+  user_owns_byte((void *)cmd_line, false);
   if (is_kernel_vaddr(cmd_line + PGSIZE - 1)) {
     user_owns_string(cmd_line, PGSIZE - 1);
   }
@@ -551,7 +567,7 @@ static void syscall_read(struct intr_frame *f) {
   int bytes_read;
 
   if (fd == STDIN_FD) {
-    user_owns_memory_range(buffer, size);
+    user_owns_memory_range(buffer, size, true);
     // Read from the console.
     user_memory_pages_foreach(buffer, size, &page_console_read, NULL);
     // Given the original memory is valid, we will record all `size` bytes
@@ -572,7 +588,7 @@ static void syscall_read(struct intr_frame *f) {
     state.eof_reached = false;
     state.bytes_read = 0;
 
-    user_owns_memory_range(buffer, size);
+    user_owns_memory_range(buffer, size, true);
     user_memory_pages_foreach(buffer, size, &page_file_read, &state);
 
     bytes_read = state.bytes_read;
@@ -592,7 +608,7 @@ static void syscall_write(struct intr_frame *f) {
     unsigned, size
   );
 
-  user_owns_memory_range(buffer, size);
+  user_owns_memory_range((void *)buffer, size, false);
 
   if (fd == STDOUT_FD) {
     // Console write
