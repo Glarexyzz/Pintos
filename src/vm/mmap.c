@@ -7,6 +7,10 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 
+/// Functions for operating on internal elements in the mapping table.
+static inline struct mmap_entry *from_hash_elem(
+  const struct hash_elem *element
+);
 static unsigned mmap_entry_hash(
   const struct hash_elem *element,
   void *aux UNUSED
@@ -16,6 +20,20 @@ static bool mmap_entry_id_smaller(
   const struct hash_elem *b,
   void *aux UNUSED
 );
+/**
+ * Converts a generic hash-table element to a memory-mapping entry, returning
+ * NULL if the address to the hash element itself is NULL.
+ * Produces undefined behaviour if the given element is a different type of
+ * hashing element.
+ * @param element The generic hash table element.
+ * @return `NULL` if element is NULL, and the memory mapping entry otherwise.
+ */
+static inline struct mmap_entry *from_hash_elem(
+  const struct hash_elem *element
+) {
+  return (element == NULL) ? NULL
+    : hash_entry(element, struct mmap_entry, elem);
+}
 
 /**
  * A hash_hash_func for mmap_entry struct.
