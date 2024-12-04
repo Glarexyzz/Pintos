@@ -20,6 +20,9 @@ static bool mmap_entry_id_smaller(
   const struct hash_elem *b,
   void *aux UNUSED
 );
+
+static void remove_spt_entries(struct list *mapped_pages);
+
 /**
  * Converts a generic hash-table element to a memory-mapping entry, returning
  * NULL if the address to the hash element itself is NULL.
@@ -116,4 +119,33 @@ void mmap_flush_entry(struct spt_entry *entry) {
   lock_acquire(&file_system_lock);
   file_write_at(in_mmap_entry->file, frame, offset, write_amount);
   lock_release(&file_system_lock);
+}
+
+/**
+ * Frees a list of mapped pages corresponding to memory-mapped files, flushing
+ * changes if required.
+ * @param mapped_pages A list of mapped pages.
+ * @remark mapped_pages itself is not freed.
+ */
+static void remove_spt_entries(struct list *mapped_pages) {
+  ASSERT(!list_empty(mapped_pages));
+  struct list_elem *cur = list_begin(mapped_pages);
+  struct hash *spt = &thread_current()->spt;
+  while (cur != list_end(mapped_pages)) {
+    struct list_elem *next = list_next(cur);
+    // Delete from the list.
+    list_remove(cur);
+    // The SPT entry is chained to the list of mapped pages using mmap.elem;
+    // obtain the underlying SPT entry
+    struct spt_entry *spt_entry = list_entry(cur, struct spt_entry, mmap.elem);
+    // Flush changes in any currently-allocated frames if they have been
+    // written to.
+    mmap_flush_entry(spt_entry);
+    // Remove the mapped page from the SPT; this must have been malloced
+    // beforehand.
+    hash_delete(spt, &spt_entry->elem);
+    free(spt_entry);
+    cur = next;
+  }
+  ASSERT(list_empty(mapped_pages));
 }
