@@ -131,9 +131,13 @@ static bool create_spt_entries(
   ASSERT(dest_mmap_entry != NULL);
   ASSERT(len > 0);
   // First, check that the file's memory-mapped region does not overlap with
-  // the stack.
+  // the stack, NULL pointer, or the basal address is misaligned.
+  void *base_addr = dest_mmap_entry->maddr;
+  if (base_addr == NULL || pg_ofs(base_addr) != 0) {
+    return false;
+  }
   // The address of the start of the last page in the mapped file.
-  void *end_addr = pg_round_down(dest_mmap_entry->maddr + len);
+  void *end_addr = pg_round_down(base_addr + len);
   if (end_addr >= PHYS_BASE - STACK_MAX) {
     return false;
   }
@@ -147,7 +151,8 @@ static bool create_spt_entries(
       success = false;
       break;
     }
-    entry->uvaddr = dest_mmap_entry->maddr + cur_off;
+    entry->uvaddr = base_addr + cur_off;
+    ASSERT(pg_ofs(entry->uvaddr) == 0);
     // Check if the entry is present in the SPT.
     // This is needed to check for overlap with existing pages, such as the
     // program's executable pages.
