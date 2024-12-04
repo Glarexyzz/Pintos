@@ -123,8 +123,8 @@ bool mmap_init(void) {
  * in the SPT or the stack.
  */
 static bool create_spt_entries(
-    struct mmap_entry *dest_mmap_entry,
-    off_t len
+  struct mmap_entry *dest_mmap_entry,
+  off_t len
 ) {
   ASSERT(dest_mmap_entry != NULL);
   ASSERT(len > 0);
@@ -274,8 +274,8 @@ static void remove_spt_entries(struct list *mapped_pages) {
 }
 
 static void free_mmap_elem(
-    struct hash_elem *mmap_hash_elem,
-    void *aux UNUSED
+  struct hash_elem *mmap_hash_elem,
+  void *aux UNUSED
 ) {
   ASSERT(mmap_hash_elem != NULL);
   // Obtain the underlying memory-mapping entry.
@@ -296,8 +296,8 @@ void mmap_remove_mapping(mapid_t mapping_id) {
   struct hash_elem *found_elem = hash_delete(get_mmap_table(), &key.elem);
   // Do nothing if we don't find the given mapping in our table.
   if (found_elem == NULL) {
-      return;
-    }
+    return;
+  }
   // Release the resources used to create the entry.
   free_mmap_elem(found_elem, NULL);
 }
