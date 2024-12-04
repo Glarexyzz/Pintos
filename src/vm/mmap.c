@@ -330,6 +330,14 @@ static void remove_spt_entries(struct list *mapped_pages) {
   ASSERT(list_empty(mapped_pages));
 }
 
+/**
+ * Frees a current process's memory-mapped entry given by a generic hashing
+ * element.
+ * Produces undefined behaviour if the hash element does not correspond to a
+ * memory-mapping entry.
+ * @param mmap_hash_elem The (generic) hash table element.
+ * @param aux (Unused.)
+ */
 static void free_mmap_elem(
   struct hash_elem *mmap_hash_elem,
   void *aux UNUSED
@@ -343,10 +351,21 @@ static void free_mmap_elem(
   free(mmap_entry);
 }
 
+/**
+ * Destroys the current hash table, implicitly unmapping all entries
+ * and freeing any owned resources.
+ * @remark This function may acquire the file system lock.
+ */
 void mmap_destroy(void) {
   hash_destroy(get_mmap_table(), &free_mmap_elem);
 }
 
+/**
+ * Unmaps an entry from the current process's memory-mapped file table,
+ * flushing changes if needed.
+ * Does nothing if the entry is not mapped.
+ * @remark This function may acquire the file system lock.
+ */
 void mmap_remove_mapping(mapid_t mapping_id) {
   struct mmap_entry key;
   key.mapping_id = mapping_id;
