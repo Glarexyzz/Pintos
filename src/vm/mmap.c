@@ -309,6 +309,8 @@ bool mmap_load_entry(struct spt_entry *entry) {
   }
   // Success; zero the rest of the frame.
   memset(frame + bytes_to_read, 0, bytes_to_zero);
+  // Set the dirty bit to false on initiation.
+  pagedir_set_dirty(pagedir, entry->uvaddr, false);
   return true;
 }
 
