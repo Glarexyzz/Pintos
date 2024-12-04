@@ -210,6 +210,9 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
   }
   mapid_t mapping_id = thread_current()->mmap_id_counter++;
   entry->mapping_id = mapping_id;
+  // Insert into the memory mapping table.
+  struct hash_elem *prev = hash_insert(get_mmap_table(), &entry->elem);
+  ASSERT(prev != NULL);
   return mapping_id;
 }
 
