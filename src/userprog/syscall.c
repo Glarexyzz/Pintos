@@ -138,7 +138,6 @@ static void user_memory_pages_foreach(
 );
 
 static void user_owns_byte(const void *uvaddr);
-static struct fd_entry *get_fd_entry(int fd);
 static void user_owns_memory_range(const void *buffer_, unsigned size);
 static bool user_owns_string(const char *base, int max_length);
 static void syscall_handler (struct intr_frame *);
