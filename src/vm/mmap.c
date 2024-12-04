@@ -213,7 +213,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
     return MAP_FAILED;
   }
   entry->maddr = base_addr;
-  entry->file = fd_entry->file;
+  entry->file = reopened;
   if (!create_spt_entries(entry, len)) {
     file_close(reopened);
     free(entry);
