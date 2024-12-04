@@ -13,6 +13,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/mmap.h"
 
 /// The maximum number of bytes to write to the console at a time
 #define MAX_WRITE_SIZE 300
@@ -154,19 +155,19 @@ static void page_file_read(void *page, unsigned size, void *state_);
 static void page_file_write(void *page, unsigned size, void *state_);
 
 static void syscall_not_implemented(struct intr_frame *f);
-static void halt(struct intr_frame *f) NO_RETURN;
-static void exit(struct intr_frame *f);
-static void exec(struct intr_frame *f);
-static void wait(struct intr_frame *f);
-static void create(struct intr_frame *f);
-static void remove_handler(struct intr_frame *f);
-static void open(struct intr_frame *f);
-static void filesize(struct intr_frame *f);
-static void read(struct intr_frame *f);
-static void write(struct intr_frame *f);
-static void seek(struct intr_frame *f);
-static void tell(struct intr_frame *f);
-static void close(struct intr_frame *f);
+static void syscall_halt(struct intr_frame *f) NO_RETURN;
+static void syscall_exit(struct intr_frame *f);
+static void syscall_exec(struct intr_frame *f);
+static void syscall_wait(struct intr_frame *f);
+static void syscall_create(struct intr_frame *f);
+static void syscall_remove(struct intr_frame *f);
+static void syscall_open(struct intr_frame *f);
+static void syscall_filesize(struct intr_frame *f);
+static void syscall_read(struct intr_frame *f);
+static void syscall_write(struct intr_frame *f);
+static void syscall_seek(struct intr_frame *f);
+static void syscall_tell(struct intr_frame *f);
+static void syscall_close(struct intr_frame *f);
 
 /**
  * Lock for reading to and writing from the console.
@@ -176,19 +177,19 @@ struct lock console_lock;
 
 // Handler for system calls corresponding to those defined in syscall-nr.h
 const syscall_handler_func syscall_handlers[] = {
-  &halt,
-  &exit,
-  &exec,
-  &wait,
-  &create,
-  &remove_handler,
-  &open,
-  &filesize,
-  &read,
-  &write,
-  &seek,
-  &tell,
-  &close,
+  &syscall_halt,
+  &syscall_exit,
+  &syscall_exec,
+  &syscall_wait,
+  &syscall_create,
+  &syscall_remove,
+  &syscall_open,
+  &syscall_filesize,
+  &syscall_read,
+  &syscall_write,
+  &syscall_seek,
+  &syscall_tell,
+  &syscall_close,
   &syscall_not_implemented,
   &syscall_not_implemented
 };
@@ -417,7 +418,7 @@ static void syscall_not_implemented(struct intr_frame *f UNUSED) {
  * Handles halt system calls.
  * @param f The interrupt stack frame
  */
-static void halt(struct intr_frame *f UNUSED) {
+static void syscall_halt(struct intr_frame *f UNUSED) {
   // void halt(void)
   shutdown_power_off();
 }
@@ -426,7 +427,7 @@ static void halt(struct intr_frame *f UNUSED) {
  * Handles exit system calls.
  * @param f The interrupt stack frame
  */
-static void exit(struct intr_frame *f UNUSED) {
+static void syscall_exit(struct intr_frame *f UNUSED) {
   // void exit(int status)
   ONE_ARG(int, status);
   exit_user_process(status);
@@ -436,7 +437,7 @@ static void exit(struct intr_frame *f UNUSED) {
  * Handles exec system calls.
  * @param f The interrupt stack frame
  */
-static void exec(struct intr_frame *f) {
+static void syscall_exec(struct intr_frame *f) {
   // pid_t exec(const char *cmd_line)
   ONE_ARG(char *, cmd_line);
 
@@ -450,7 +451,7 @@ static void exec(struct intr_frame *f) {
  * Handles wait system calls.
  * @param f The interrupt stack frame
  */
-static void wait(struct intr_frame *f) {
+static void syscall_wait(struct intr_frame *f) {
   // int wait(pid_t pid)
   ONE_ARG(int, pid);
   f->eax = process_wait(pid);
@@ -460,7 +461,7 @@ static void wait(struct intr_frame *f) {
  * Handles create system calls.
  * @param f The interrupt stack frame
  */
-static void create(struct intr_frame *f) {
+static void syscall_create(struct intr_frame *f) {
   // bool create(const char *file, unsigned initial_size)
   TWO_ARG(
     const char *, user_filename,
@@ -481,7 +482,7 @@ static void create(struct intr_frame *f) {
  * Handles remove system calls.
  * @param f The interrupt stack frame
  */
-static void remove_handler(struct intr_frame *f) {
+static void syscall_remove(struct intr_frame *f) {
   // bool remove(const char *file)
   ONE_ARG(const char *, user_filename);
 
@@ -499,7 +500,7 @@ static void remove_handler(struct intr_frame *f) {
  * Handles open system calls.
  * @param f The interrupt stack frame
  */
-static void open(struct intr_frame *f) {
+static void syscall_open(struct intr_frame *f) {
   // int open(const char *file)
   ONE_ARG(const char *, user_filename);
 
@@ -538,7 +539,7 @@ static void open(struct intr_frame *f) {
  * Handles filesize system calls.
  * @param f The interrupt stack frame
  */
-static void filesize(struct intr_frame *f) {
+static void syscall_filesize(struct intr_frame *f) {
   // int filesize(int fd)
   ONE_ARG(int, fd);
 
@@ -557,7 +558,7 @@ static void filesize(struct intr_frame *f) {
  * Handles read system calls.
  * @param f The interrupt stack frame
  */
-static void read(struct intr_frame *f) {
+static void syscall_read(struct intr_frame *f) {
   // int read(int fd, void *buffer, unsigned size)
   THREE_ARG(
     int, fd,
@@ -605,7 +606,7 @@ static void read(struct intr_frame *f) {
  * Handles write system calls.
  * @param f The interrupt stack frame
  */
-static void write(struct intr_frame *f) {
+static void syscall_write(struct intr_frame *f) {
   // write(int fd, const void *buffer, unsigned size)
   THREE_ARG(
     int, fd,
@@ -660,7 +661,7 @@ static void write(struct intr_frame *f) {
  * Handles seek system calls.
  * @param f The interrupt stack frame
  */
-static void seek(struct intr_frame *f) {
+static void syscall_seek(struct intr_frame *f) {
   // void seek(int fd, unsigned position)
   TWO_ARG(
     int, fd,
@@ -680,7 +681,7 @@ static void seek(struct intr_frame *f) {
  * Handles tell system calls.
  * @param f The interrupt stack frame
  */
-static void tell(struct intr_frame *f) {
+static void syscall_tell(struct intr_frame *f) {
   // unsigned tell(int fd)
   ONE_ARG(int, fd);
 
@@ -699,7 +700,7 @@ static void tell(struct intr_frame *f) {
  * Handles close system calls.
  * @param f The interrupt stack frame
  */
-static void close(struct intr_frame *f UNUSED) {
+static void syscall_close(struct intr_frame *f UNUSED) {
   // void close(int fd)
   ONE_ARG(int, fd);
 
