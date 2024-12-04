@@ -191,7 +191,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
     return MAP_FAILED;
   }
   // We cannot map an empty file.
-  off_t len = file_tell(reopened);
+  off_t len = file_length(reopened);
   if (len == 0) {
     file_close(reopened);
     return MAP_FAILED;
