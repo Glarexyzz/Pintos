@@ -18,4 +18,7 @@ struct mmap_entry {
   struct hash_elem elem;  /* Used to insert the element into mmap_table. */
 };
 
+/// Function for updating changes to a singular memory-mapped page to the disk.
+void mmap_flush_entry(spt_entry_ptr entry);
+
 #endif //MMAP_H

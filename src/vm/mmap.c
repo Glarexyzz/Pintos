@@ -66,3 +66,34 @@ static bool mmap_entry_id_smaller(
   mapid_t b_id = from_hash_elem(b)->mapping_id;
   return a_id < b_id;
 }
+
+/**
+ * Flushes a given frame in a memory-mapped page to the disk, if it is present
+ * and has been written to (the dirty bit is set to `true`).
+ * @param entry The entry in the current thread's SPT.
+ * @pre The entry is non-null, and the type is MMAP.
+ */
+void mmap_flush_entry(struct spt_entry *entry) {
+  ASSERT(entry != NULL);
+  ASSERT(entry->type == MMAP);
+  // Get the frame from the page, if one exists.
+  void *frame = pagedir_get_page(thread_current()->pagedir, entry->uvaddr);
+  // If the frame is not present, we must have already flushed its changes out
+  // or the page was never in memory in the first place.
+  if (frame == NULL) {
+    return;
+  }
+  // If the frame hasn't been written to, we don't need to write to the disk.
+  if (!entry->mmap.dirty_bit) {
+    return;
+  }
+  struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
+  // Verify that the reference to the parent entry is valid.
+  ASSERT(in_mmap_entry != NULL);
+  off_t offset = entry->uvaddr - in_mmap_entry->maddr;
+  off_t write_amount = entry->mmap.page_file_bytes;
+  // Write to the file.
+  lock_acquire(&file_system_lock);
+  file_write_at(in_mmap_entry->file, frame, offset, write_amount);
+  lock_release(&file_system_lock);
+}
