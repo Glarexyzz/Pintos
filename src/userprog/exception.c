@@ -13,6 +13,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
@@ -309,6 +310,9 @@ page_fault (struct intr_frame *f)
   switch (found_entry->type) {
     case UNINITIALISED_EXECUTABLE:
       if (!load_uninitialised_executable(found_entry)) goto fail;
+      break;
+    case MMAP:
+      if (!mmap_load_entry(found_entry)) goto fail;
       break;
   }
 
