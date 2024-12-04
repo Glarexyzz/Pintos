@@ -159,6 +159,11 @@ static bool create_spt_entries(
     entry->type = MMAP;
     entry->mmap.mmap_entry = dest_mmap_entry;
     entry->mmap.dirty_bit = false;
+    // Add the expected number of page and zero bytes.
+    off_t remaining = len - cur_off;
+    size_t page_file_bytes = remaining % PGSIZE;
+    entry->mmap.page_file_bytes = page_file_bytes;
+    entry->mmap.page_zero_bytes = PGSIZE - page_file_bytes;
     list_push_back(spt_entries, &entry->mmap.elem);
     // Insert the SPT entry into the table.
     struct hash_elem *prev = hash_insert(spt, &entry->elem);
