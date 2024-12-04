@@ -188,6 +188,7 @@ static bool create_spt_entries(
  * process's FD table, or the memory location given by the basal address is
  * invalid (i.e., there is an overlap with the stack or existing pages in the
  * process's SPT).
+ * @remark This function needs to acquire the file system lock.
  */
 mapid_t mmap_add_mapping(int fd, void *base_addr) {
   // First check if the file is currently in the user's file directory,
@@ -231,6 +232,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
  * and has been written to (the dirty bit is set to `true`).
  * @param entry The entry in the current process's SPT.
  * @pre The entry is non-null, and the type is MMAP.
+ * @remark The caller is responsible for freeing the underlying page.
  */
 void mmap_flush_entry(struct spt_entry *entry) {
   ASSERT(entry != NULL);
@@ -263,6 +265,8 @@ void mmap_flush_entry(struct spt_entry *entry) {
  * @return `true` if an allocation occurred (i.e., no frame was previously
  * allocated for the page, and allocation succeeded.)
  * @pre The entry is non-null, and the type is MMAP.
+ * @remark This function needs to acquire the file system lock.
+ * @remark The caller is responsible for freeing the allocated frame.
  */
 bool mmap_load_entry(struct spt_entry *entry) {
   ASSERT(entry != NULL);
