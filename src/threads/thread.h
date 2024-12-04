@@ -123,8 +123,8 @@ struct thread
     struct hash spt;                    /* Supplemental page table. */
 
 	struct hash mmap_table;             /* Memory mapped file table. */
-	int mmap_id_counter;				/* Counter for allocating mapping
-										 * ID number. */
+  /* Counter for allocating memory-mapped file ID numbers. */
+	int mmap_id_counter;
 #endif
 
     /* Owned by thread.c. */
