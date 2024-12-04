@@ -420,7 +420,7 @@ static void syscall_halt(struct intr_frame *f UNUSED) {
  * Handles exit system calls.
  * @param f The interrupt stack frame
  */
-static void syscall_exit(struct intr_frame *f UNUSED) {
+static void syscall_exit(struct intr_frame *f) {
   // void exit(int status)
   ONE_ARG(int, status);
   exit_user_process(status);
@@ -693,7 +693,7 @@ static void syscall_tell(struct intr_frame *f) {
  * Handles close system calls.
  * @param f The interrupt stack frame
  */
-static void syscall_close(struct intr_frame *f UNUSED) {
+static void syscall_close(struct intr_frame *f) {
   // void close(int fd)
   ONE_ARG(int, fd);
 
