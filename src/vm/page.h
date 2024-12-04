@@ -4,9 +4,16 @@
 #include <debug.h>
 #include <hash.h>
 
+/// spt_entry data for an uninitialised executable.
+struct uninitialised_executable {
+  int page_read_bytes;      /* Number of bytes to read. */
+  int page_zero_bytes;      /* Number of bytes to set to zero. */
+  int offset;               /* Offset in the file to read from. */
+};
+
 /// Describes where the data referred to by the SPT is located.
 enum spt_entry_type {
-  PLACEHOLDER // TODO: Remove this
+  UNINITIALISED_EXECUTABLE
 };
 
 /// Entry for the supplemental page table.
@@ -14,7 +21,9 @@ struct spt_entry {
   void *uvaddr;             /* The user virtual address. */
   enum spt_entry_type type; /* The type of the data, used to decode the
                              * union. */
+  bool writable;            /* Whether the page is writable. */
   union {                   /* The spt_entry_type-specific data. */
+    struct uninitialised_executable exec_file;
   };
 
   struct hash_elem elem;    /* For insertion into the supplemental page

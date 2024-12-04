@@ -976,8 +976,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
-  while (read_bytes > 0 || zero_bytes > 0) 
+  while (read_bytes > 0 || zero_bytes > 0)
     {
       /* Calculate how to fill this page.
          We will read PAGE_READ_BYTES bytes from FILE
@@ -989,40 +988,31 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       struct thread *t = thread_current ();
       uint8_t *kpage = pagedir_get_page (t->pagedir, upage);
       
-      if (kpage == NULL){
-        
-        /* Get a new page of memory. */
-        kpage = user_get_page(0);
-        if (kpage == NULL){
-          return false;
-        }
-        
-        /* Add the page to the process's address space. */
-        if (!install_page (upage, kpage, writable)) 
-        {
-          user_free_page (kpage);
-          return false; 
-        }     
-        
-      } else {
-        
-        /* Check if writable flag for the page should be updated */
-        if(writable && !pagedir_is_writable(t->pagedir, upage)){
-          pagedir_set_writable(t->pagedir, upage, writable); 
-        }
-        
+      if (kpage != NULL) {
+        // Free the page to remove old data.
+        user_free_page(kpage);
       }
 
-      /* Load data into the page. */
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes){
-        return false; 
+      // Construct the element to insert into the spt.
+      struct spt_entry *entry = malloc(sizeof(struct spt_entry));
+      if (entry == NULL) {
+        // Kernel out of memory!
+        exit_user_process(-1);
       }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
+      entry->uvaddr = upage;
+      entry->type = UNINITIALISED_EXECUTABLE;
+      entry->writable = writable;
+      entry->exec_file.page_read_bytes = page_read_bytes;
+      entry->exec_file.page_zero_bytes = page_zero_bytes;
+      entry->exec_file.offset = ofs;
+
+      hash_insert(&t->spt, &entry->elem);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      ofs += PGSIZE;
     }
   return true;
 }
