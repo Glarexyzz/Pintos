@@ -36,6 +36,19 @@ static inline struct mmap_entry *from_hash_elem(
 }
 
 /**
+ * Returns the mapping entry corresponding to a given mapping ID in the
+ * current thread's file memory-mapping table, or NULL if none exists.
+ * @param mapping_id The mapping ID to be keyed.
+ * @return The (possibly `NULL`) mapping entry.
+ */
+struct mmap_entry *mmap_get_entry(mapid_t mapping_id) {
+  struct mmap_entry key;
+  key.mapping_id = mapping_id;
+  struct hash_elem *elem = hash_find(get_mmap_table(), &key.elem);
+  return from_hash_elem(elem);
+}
+
+/**
  * A hash_hash_func for mmap_entry struct.
  * @param element The pointer to the hash_elem in the mmap_entry struct.
  * @param aux Unused.
@@ -67,6 +80,13 @@ static bool mmap_entry_id_smaller(
   return a_id < b_id;
 }
 
+/**
+ * Obtain the current thread's file memory-mapping table.
+ * @return The mapping hash table.
+ */
+struct hash *get_mmap_table(void) {
+  return &thread_current()->mmap_table;
+}
 /**
  * Flushes a given frame in a memory-mapped page to the disk, if it is present
  * and has been written to (the dirty bit is set to `true`).
