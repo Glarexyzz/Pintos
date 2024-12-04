@@ -138,6 +138,7 @@ static bool create_spt_entries(
   // Now attempt to allocate SPT entries for insertion.
   bool success = true;
   struct list *spt_entries = &dest_mmap_entry->pages;
+  list_init(spt_entries);
   for (off_t cur_off = 0; cur_off < len; cur_off += PGSIZE) {
     struct spt_entry *entry = malloc(sizeof(struct spt_entry));
     if (entry == NULL) {
