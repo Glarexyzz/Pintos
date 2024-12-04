@@ -21,6 +21,9 @@ static bool mmap_entry_id_smaller(
   void *aux UNUSED
 );
 
+/// Functions for obtaining and releasing allocated memory
+/// for the mapping table.
+static bool create_spt_entries(struct mmap_entry *dest_mmap_entry, off_t len);
 static void remove_spt_entries(struct list *mapped_pages);
 static void free_mmap_elem(struct hash_elem *mmap_hash_elem, void *aux UNUSED);
 
@@ -108,6 +111,64 @@ bool mmap_init(void) {
   );
 }
 
+/**
+ * Allocates and inserts entries for the given memory-mapped region into the
+ * current thread's SPT, if the region is valid.
+ * The calling function is responsible for freeing the destination entry
+ * in the memory-mapping table.
+ * @param dest_mmap_entry The (non-null) entry, not yet inserted into the
+ * mapping table.
+ * @param len The length of the file.
+ * @return `false` iff the memory-mapping region overlaps with existing pages
+ * in the SPT or the stack.
+ */
+static bool create_spt_entries(
+    struct mmap_entry *dest_mmap_entry,
+    off_t len
+) {
+  ASSERT(dest_mmap_entry != NULL);
+  ASSERT(len > 0);
+  // First, check that the file's memory-mapped region does not overlap with
+  // the stack.
+  // The address of the start of the last page in the mapped file.
+  void *end_addr = pg_round_down(dest_mmap_entry->maddr + len);
+  if (end_addr >= PHYS_BASE - STACK_MAX) {
+    return false;
+  }
+  // Now attempt to allocate SPT entries for insertion.
+  bool success = true;
+  struct list *spt_entries = &dest_mmap_entry->pages;
+  for (off_t cur_off = 0; cur_off < len; cur_off += PGSIZE) {
+    struct spt_entry *entry = malloc(sizeof(struct spt_entry));
+    if (entry == NULL) {
+      success = false;
+      break;
+    }
+    entry->uvaddr = dest_mmap_entry->maddr + cur_off;
+    // Check if the entry is present in the SPT.
+    // This is needed to check for overlap with existing pages, such as the
+    // program's executable pages.
+    struct hash *spt = &thread_current()->spt;
+    if (hash_find(spt, &entry->elem) != NULL) {
+      free(entry);
+      success = false;
+      break;
+    }
+    // Add the fields to the SPT entry.
+    entry->type = MMAP;
+    entry->mmap.mmap_entry = dest_mmap_entry;
+    entry->mmap.dirty_bit = false;
+    list_push_back(spt_entries, &entry->mmap.elem);
+    // Insert the SPT entry into the table.
+    struct hash_elem *prev = hash_insert(spt, &entry->elem);
+    ASSERT(prev == NULL);
+  }
+  if (!success) {
+    remove_spt_entries(&dest_mmap_entry->pages);
+    return false;
+  }
+  return success;
+}
 /**
  * Flushes a given frame in a memory-mapped page to the disk, if it is present
  * and has been written to (the dirty bit is set to `true`).
