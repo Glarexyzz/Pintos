@@ -255,7 +255,7 @@ void mmap_flush_entry(struct spt_entry *entry) {
   off_t write_amount = entry->mmap.page_file_bytes;
   // Write to the file.
   lock_acquire(&file_system_lock);
-  file_write_at(in_mmap_entry->file, frame, offset, write_amount);
+  file_write_at(in_mmap_entry->file, frame, write_amount, offset);
   lock_release(&file_system_lock);
 }
 
