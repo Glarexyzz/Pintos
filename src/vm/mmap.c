@@ -257,8 +257,8 @@ void mmap_flush_entry(struct spt_entry *entry) {
 /**
  * Allocates a given frame for a memory-mapped page, if none is already present.
  * @param entry The entry in the current process's SPT.
- * @return `true` if an allocation occurred (i.e., no frame was allocated for
- * the page, and allocation succeeded.)
+ * @return `true` if an allocation occurred (i.e., no frame was previously
+ * allocated for the page, and allocation succeeded.)
  * @pre The entry is non-null, and the type is MMAP.
  */
 bool mmap_load_entry(struct spt_entry *entry) {
