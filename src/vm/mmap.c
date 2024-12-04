@@ -245,7 +245,7 @@ void mmap_flush_entry(struct spt_entry *entry) {
     return;
   }
   // If the frame hasn't been written to, we don't need to write to the disk.
-  if (!entry->mmap.dirty_bit) {
+  if (!pagedir_is_dirty(thread_current()->pagedir, entry->uvaddr)) {
     return;
   }
   struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
