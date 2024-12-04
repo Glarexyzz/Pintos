@@ -164,6 +164,10 @@ static void free_mmap_elem(
   free(mmap_entry);
 }
 
+void mmap_destroy(void) {
+  hash_destroy(get_mmap_table(), &free_mmap_elem);
+}
+
 void mmap_remove_mapping(mapid_t mapping_id) {
   struct mmap_entry key;
   key.mapping_id = mapping_id;

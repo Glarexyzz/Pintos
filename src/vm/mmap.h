@@ -22,6 +22,8 @@ struct mmap_entry {
 void mmap_flush_entry(spt_entry_ptr entry);
 
 struct hash *get_mmap_table(void);
+void mmap_destroy(void);
+
 struct mmap_entry *mmap_get_entry(mapid_t mapping_id);
 void mmap_remove_mapping(mapid_t mapping_id);
 
