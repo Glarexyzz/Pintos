@@ -993,6 +993,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         user_free_page(kpage);
       }
 
+      // Remove entry from SPT if it already exists
+      struct spt_entry entry_to_find;
+      entry_to_find.uvaddr = upage;
+      struct hash_elem *found_elem = hash_find(&t->spt, &entry_to_find.elem);
+      if (found_elem != NULL) {
+        hash_delete(&t->spt, found_elem);
+      }
+
       // Construct the element to insert into the spt.
       struct spt_entry *entry = malloc(sizeof(struct spt_entry));
       if (entry == NULL) {
