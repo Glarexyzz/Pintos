@@ -6,7 +6,7 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 
-/// Item to insert into the frame table
+/// Item to insert into the frame/share table
 struct frame {
   void *kvaddr;                      /* Kernel virtual address */
   struct list owners;                /* List of processes which own the frame */
@@ -24,8 +24,12 @@ struct frame {
 struct hash frame_table;
 struct lock frame_table_lock;
 
+struct hash share_table;
+struct lock share_table_lock;
+
 void frame_table_init(void);
 void share_table_init(void);
+void frame_add_owner(struct frame *frame, struct thread *t);
 void *user_get_page(enum palloc_flags flags);
 void user_free_page(void *page);
 

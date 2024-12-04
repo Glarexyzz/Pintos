@@ -4,13 +4,13 @@
 #include <debug.h>
 #include <hash.h>
 #include "filesys/file.h"
+#include "vm/frame.h"
 
 /// spt_entry data for an uninitialised executable.
 struct uninitialised_executable {
-  int page_read_bytes;      /* Number of bytes to read. */
-  int page_zero_bytes;      /* Number of bytes to set to zero. */
-  int offset;               /* Offset in the file to read from. */
-  struct file *file;        /* The file to which the page belongs. */
+  int page_read_bytes;       /* Number of bytes to read. */
+  int page_zero_bytes;       /* Number of bytes to set to zero. */
+  struct frame *share_frame; /* The shared frame in the share table. */
 };
 
 /// Describes where the data referred to by the SPT is located.

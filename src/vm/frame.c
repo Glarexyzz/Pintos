@@ -2,6 +2,7 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include "vm/frame.h"
 
 /// The item to be inserted into the frame struct's owners list
@@ -27,6 +28,20 @@ static unsigned frame_kvaddr_hash(
 static bool frame_kvaddr_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
+  void *aux UNUSED
+);
+static unsigned frame_file_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
+static bool frame_file_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
+static bool frame_owner_smaller(
+  const struct list_elem *a,
+  const struct list_elem *b,
   void *aux UNUSED
 );
 
@@ -131,6 +146,40 @@ void share_table_init() {
     PANIC("Could not initialise share table!");
   }
   lock_init(&share_table_lock);
+}
+
+/**
+ * A list_less_func for owner structs.
+ * @param a The pointer to the list_elem in the first owner struct.
+ * @param b The pointer to the list_elem in the second owner struct.
+ * @param aux Unused
+ * @return True iff a < b
+ */
+static bool frame_owner_smaller(
+  const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux UNUSED
+) {
+  pid_t *a_pid = list_entry(a, struct owner, elem)->process->tid;
+  pid_t *b_pid = list_entry(b, struct owner, elem)->process->tid;
+
+  return a_pid < b_pid;
+}
+
+/**
+ * Adds an owner to a frame.
+ * @param frame The frame.
+ * @param t The thread to be added as an owner.
+ * @pre The share_table_lock is owned by the caller.
+ */
+void frame_add_owner(struct frame *frame, struct thread *t) {
+  struct owner *owner = malloc(sizeof(owner));
+  if (owner == NULL) {
+    PANIC("Kernel out of memory!");
+  }
+  owner->process = t;
+
+  list_insert_ordered(&frame->owners, &owner->elem, &frame_owner_smaller, NULL);
 }
 
 /**
