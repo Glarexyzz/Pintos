@@ -1,7 +1,8 @@
-#include "vm/frame.h"
+#include "filesys/file.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
+#include "vm/frame.h"
 
 /// The item to be inserted into the frame struct's owners list
 struct owner {
@@ -14,7 +15,15 @@ struct hash frame_table;
 /// The lock for the frame table
 struct lock frame_table_lock;
 
-static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED);
+/// The table of read-only file mappings
+struct hash share_table;
+/// The lock for the share table
+struct lock share_table_lock;
+
+static unsigned frame_kvaddr_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
 static bool frame_kvaddr_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
@@ -23,30 +32,35 @@ static bool frame_kvaddr_smaller(
 
 
 /**
- * A hash_hash_func for frame struct.
- * @param element The pointer to the hash_elem in the frame struct.
+ * A hash_hash_func for frame struct, based on the kvaddr.
+ * @param element The pointer to the frame_table_elem in the frame struct.
  * @param aux Unused.
  * @return The hash of the frame.
+ * @remark Used for the frame table.
  */
-static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED) {
-  void *kvaddr = hash_entry(element, struct frame, table_elem)->kvaddr;
+static unsigned frame_kvaddr_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  void *kvaddr = hash_entry(element, struct frame, frame_table_elem)->kvaddr;
   return hash_bytes(&kvaddr, sizeof (void *));
 }
 
 /**
- * A hash_less_func for frame struct.
+ * A hash_less_func for frame struct, based on the kvaddr.
  * @param a The pointer to the hash_elem in the first frame struct.
  * @param b The pointer to the hash_elem in the second frame struct.
  * @param aux Unused.
  * @return True iff a < b.
+ * @remark Used for the frame table.
  */
 static bool frame_kvaddr_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
   void *aux UNUSED
 ) {
-  void *a_kvaddr = hash_entry(a, struct frame, table_elem)->kvaddr;
-  void *b_kvaddr = hash_entry(b, struct frame, table_elem)->kvaddr;
+  void *a_kvaddr = hash_entry(a, struct frame, frame_table_elem)->kvaddr;
+  void *b_kvaddr = hash_entry(b, struct frame, frame_table_elem)->kvaddr;
   return a_kvaddr < b_kvaddr;
 }
 
@@ -57,7 +71,7 @@ static bool frame_kvaddr_smaller(
 void frame_table_init() {
   bool success = hash_init(
     &frame_table,
-    &frame_hash,
+    &frame_kvaddr_hash,
     &frame_kvaddr_smaller,
     NULL
   );
@@ -65,6 +79,58 @@ void frame_table_init() {
     PANIC("Could not initialise frame table!");
   }
   lock_init(&frame_table_lock);
+}
+
+/**
+ * A hash_hash_func for frame struct, based on the file and offset.
+ * @param element The pointer to the hash_elem in the frame struct.
+ * @param aux Unused.
+ * @return The hash of the frame, based on file and offset.
+ * @remark Used for the share table.
+ */
+static unsigned frame_file_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  struct frame *frame = hash_entry(element, struct frame, share_table_elem);
+  return file_hash(frame->file) + hash_int(frame->offset);
+}
+
+/**
+ * A hash_less_func for frame struct, based on the file and offset.
+ * @param a The pointer to the hash_elem in the first frame struct.
+ * @param b The pointer to the hash_elem in the second frame struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ * @remark Used for the share table.
+ */
+static bool frame_file_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  struct frame *a_frame = hash_entry(a, struct frame, share_table_elem);
+  struct frame *b_frame = hash_entry(b, struct frame, share_table_elem);
+
+  return (file_hash(a_frame->file) + a_frame->offset) <
+  (file_hash(a_frame->file) + b_frame->offset);
+}
+
+/**
+ * Initialise the share table and share table lock.
+ * @remark Panics the kernel if initialisation fails.
+ */
+void share_table_init() {
+  bool success = hash_init(
+    &share_table,
+    &frame_file_hash,
+    &frame_file_smaller,
+    NULL
+  );
+  if (!success) {
+    PANIC("Could not initialise share table!");
+  }
+  lock_init(&share_table_lock);
 }
 
 /**
@@ -103,7 +169,7 @@ void *user_get_page(enum palloc_flags flags) {
 
   // Insert the page into the page table
   lock_acquire(&frame_table_lock);
-  hash_insert(&frame_table, &new_frame->table_elem);
+  hash_insert(&frame_table, &new_frame->frame_table_elem);
   lock_release(&frame_table_lock);
 
 #endif
@@ -132,13 +198,13 @@ void user_free_page(void *page) {
   lock_acquire(&frame_table_lock);
   struct hash_elem *found_frame_elem = hash_find(
     &frame_table,
-    &frame_to_find.table_elem
+    &frame_to_find.frame_table_elem
   );
   ASSERT(found_frame_elem != NULL);
   struct frame *found_frame = hash_entry(
     found_frame_elem,
     struct frame,
-    table_elem
+    frame_table_elem
   );
 
   // Iterate through the frame's owners
