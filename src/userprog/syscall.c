@@ -713,10 +713,10 @@ static void syscall_close(struct intr_frame *f) {
 static void syscall_mmap(struct intr_frame *f) {
   // mapid_t mmap(int fd, void *addr)
   TWO_ARG(
-      int, fd,
-      void *, base_addr
+    int, fd,
+    void *, addr
   );
-  f->eax = mmap_add_mapping(fd, base_addr);
+  f->eax = mmap_add_mapping(fd, addr);
 }
 
 /**
@@ -725,8 +725,8 @@ static void syscall_mmap(struct intr_frame *f) {
  */
 static void syscall_munmap(struct intr_frame *f) {
   // void munmap(mapid_t mapping)
-  ONE_ARG(mapid_t, mapping_id);
-  mmap_remove_mapping(mapping_id);
+  ONE_ARG(mapid_t, mapping);
+  mmap_remove_mapping(mapping);
 }
 
 /**
