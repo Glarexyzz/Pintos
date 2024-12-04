@@ -164,3 +164,14 @@ static void free_mmap_elem(
   free(mmap_entry);
 }
 
+void mmap_remove_mapping(mapid_t mapping_id) {
+  struct mmap_entry key;
+  key.mapping_id = mapping_id;
+  struct hash_elem *found_elem = hash_delete(get_mmap_table(), &key.elem);
+  // Do nothing if we don't find the given mapping in our table.
+  if (found_elem == NULL) {
+      return;
+    }
+  // Release the resources used to create the entry.
+  free_mmap_elem(found_elem, NULL);
+}
