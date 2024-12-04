@@ -28,7 +28,7 @@ struct memory_mapped_file {
 /// Describes where the data referred to by the SPT is located.
 enum spt_entry_type {
   UNINITIALISED_EXECUTABLE,
-  MMAP, // A page mapped to a part ofa file in the user's address space.
+  MMAP, // A page mapped to a part of a file in the user's address space.
 };
 
 /// Entry for the supplemental page table.
