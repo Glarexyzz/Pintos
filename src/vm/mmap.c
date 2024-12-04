@@ -153,11 +153,14 @@ static bool create_spt_entries(
     }
     entry->uvaddr = base_addr + cur_off;
     ASSERT(pg_ofs(entry->uvaddr) == 0);
-    // Check if the entry is present in the SPT.
+    // Check if the entry is present in the SPT or page directory.
     // This is needed to check for overlap with existing pages, such as the
     // program's executable pages.
+    uint32_t *pagedir = thread_current()->pagedir;
     struct hash *spt = &thread_current()->spt;
-    if (hash_find(spt, &entry->elem) != NULL) {
+    bool page_present = pagedir_get_page(pagedir, &entry->uvaddr) != NULL
+      || hash_find(spt, &entry->elem) != NULL;
+    if (page_present) {
       free(entry);
       success = false;
       break;
