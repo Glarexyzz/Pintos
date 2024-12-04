@@ -168,7 +168,6 @@ static bool create_spt_entries(
     // Add the fields to the SPT entry.
     entry->type = MMAP;
     entry->mmap.mmap_entry = dest_mmap_entry;
-    entry->mmap.dirty_bit = false;
     entry->writable = true;
     // Add the expected number of page and zero bytes.
     off_t remaining = len - cur_off;

@@ -15,7 +15,6 @@ struct uninitialised_executable {
 
 // Page mapped to a file in memory.
 struct memory_mapped_file {
-  bool dirty_bit;                /* True iff the page was written to. */
   struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
   struct list_elem elem;         /* For insertion in the list of pages
                                         in the mmap_entry. */
