@@ -1,4 +1,5 @@
 #include "mmap.h"
+#include <string.h>
 #include "page.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"
@@ -6,6 +7,7 @@
 #include "userprog/exception.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
+#include "vm/frame.h"
 
 /// Functions for operating on internal elements in the mapping table.
 static inline struct mmap_entry *from_hash_elem(
@@ -266,9 +268,14 @@ bool mmap_load_entry(struct spt_entry *entry) {
   ASSERT(entry->type == MMAP);
   uint32_t *pagedir = thread_current()->pagedir;
   // If a frame is already allocated to the page, do nothing.
-  void *frame = pagedir_get_page(pagedir, entry->uvaddr);
-  // No allocation takes place.
-  if (frame != NULL) {
+  if (pagedir_get_page(pagedir, entry->uvaddr) != NULL) {
+    return false;
+  }
+  // Attempt to add to the page directory as rewritable, so that we can
+  // manipulate the frame.
+  void *frame = user_get_page(0);
+  if (!pagedir_set_page(pagedir, entry->uvaddr, frame, true)) {
+    free(frame);
     return false;
   }
   struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
@@ -284,25 +291,12 @@ bool mmap_load_entry(struct spt_entry *entry) {
   off_t read_bytes = file_read_at(source, frame, bytes_to_read, offset);
   lock_release(&file_system_lock);
   if (read_bytes != bytes_to_read) {
+    pagedir_clear_page(pagedir, entry->uvaddr);
     free(frame);
     return false;
   }
-  // Write zero bytes to the rest of the frame.
-  off_t zero_bytes = file_write_at(
-    source,
-    frame + read_bytes,
-    bytes_to_zero,
-    offset + read_bytes
-  );
-  if (zero_bytes != bytes_to_zero) {
-    free(frame);
-    return false;
-  }
-  // Add to the page directory as writable.
-  if (!pagedir_set_page(pagedir, entry->uvaddr, frame, true)) {
-    free(frame);
-    return false;
-  }
+  // Success; zero the rest of the frame.
+  memset(frame + bytes_to_read, 0, bytes_to_zero);
   return true;
 }
 
