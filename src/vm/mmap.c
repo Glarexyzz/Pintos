@@ -91,6 +91,23 @@ static bool mmap_entry_id_smaller(
 struct hash *get_mmap_table(void) {
   return &thread_current()->mmap_table;
 }
+
+/**
+ * Initialises the memory-mapped file table.
+ * @return `true` if initialisation succeeded,
+ * `false` if memory allocation failed.
+ */
+bool mmap_init(void) {
+  // Initialise the memory-mapping descriptor counter.
+  thread_current()->mmap_id_counter = 0;
+  return hash_init(
+    get_mmap_table(),
+    &mmap_entry_hash,
+    &mmap_entry_id_smaller,
+    NULL
+  );
+}
+
 /**
  * Flushes a given frame in a memory-mapped page to the disk, if it is present
  * and has been written to (the dirty bit is set to `true`).
