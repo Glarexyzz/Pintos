@@ -1,13 +1,19 @@
+#include "filesys/file.h"
 #include "userprog/pagedir.h"
 #include "userprog/exception.h"
 #include "userprog/process.h"
+#include <debug.h>
 #include <inttypes.h>
 #include <stdio.h>
+#include <string.h>
 #include "userprog/gdt.h"
+#include "userprog/process.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
 #define PUSH_SIZE 4
@@ -185,6 +191,49 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
   return true;
 }
 
+/**
+ * Handles loading of uninitialised executable file, allocating pages
+ * and reading the executable file into them.
+ * @param fault_addr The address
+ * @return
+ */
+static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
+  struct thread *cur = thread_current();
+
+  int page_read_bytes = spt_entry->exec_file.page_read_bytes;
+  int page_zero_bytes = spt_entry->exec_file.page_zero_bytes;
+
+  uint8_t *kpage = user_get_page(0);
+
+  // Read the executable file into memory.
+  int read_bytes = 0;
+  if (page_read_bytes != 0) {
+    lock_acquire(&file_system_lock);
+    file_seek(cur->executable_file, spt_entry->exec_file.offset);
+    read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+    lock_release(&file_system_lock);
+  }
+  if (read_bytes != page_read_bytes)
+    return false;
+  memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+  // Add the page to the page directory, making it read-only.
+  if (!pagedir_set_page(
+    cur->pagedir,
+    spt_entry->uvaddr,
+    kpage,
+    spt_entry->writable
+  )) {
+    user_free_page(kpage);
+    return false;
+  }
+
+  hash_delete(&cur->spt, &spt_entry->elem);
+  free(spt_entry);
+
+  return true;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to task 2 may
    also require modifying this code.
@@ -225,15 +274,56 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  // Kill the process if we attempted to write to a read-only page,
-  // or growing the stack failed.
-  if (!(user && not_present && stack_grow(f, fault_addr))) {
+  struct thread *cur = thread_current();
+
+  // Kill if the kernel page-faulted or writing to read-only page
+  if (!(cur->is_user) || !not_present) goto fail;
+
+  ASSERT(cur->is_user);
+
+  // Check if the page is in the SPT
+
+  // Find the corresponding entry in the thread SPT.
+  struct spt_entry entry_to_find;
+  entry_to_find.uvaddr = pg_round_down(fault_addr);
+
+  struct hash_elem *found_elem = hash_find(&cur->spt, &entry_to_find.elem);
+
+  if (found_elem == NULL) { // The address is not in the SPT
+    // Try to grow the stack
+    if (!stack_grow(f, fault_addr)) goto fail;
+    return; // The stack grew successfully - we're done handling the page fault
+  }
+
+  // The address is in the SPT - handle the SPT entry appropriately
+
+  struct spt_entry *found_entry = hash_entry(
+    found_elem,
+    struct spt_entry,
+    elem
+  );
+
+  // Exit if writing to a read-only page
+  if (write && !found_entry->writable) goto fail;
+
+  switch (found_entry->type) {
+    case UNINITIALISED_EXECUTABLE:
+      if (!load_uninitialised_executable(found_entry)) goto fail;
+      break;
+  }
+
+  return;
+
+ fail:
+
+  if (thread_current()->is_user) {
+    exit_user_process(ERROR_STATUS_CODE);
+  } else {
     printf ("Page fault at %p: %s error %s page in %s context.\n",
             fault_addr,
             not_present ? "not present" : "rights violation",
             write ? "writing" : "reading",
             user ? "user" : "kernel");
-    kill (f);
+    thread_exit();
   }
 }
-
