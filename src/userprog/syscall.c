@@ -154,7 +154,6 @@ static void page_console_read(void *page_, unsigned size, void *state UNUSED);
 static void page_file_read(void *page, unsigned size, void *state_);
 static void page_file_write(void *page, unsigned size, void *state_);
 
-static void syscall_not_implemented(struct intr_frame *f);
 static void syscall_halt(struct intr_frame *f) NO_RETURN;
 static void syscall_exit(struct intr_frame *f);
 static void syscall_exec(struct intr_frame *f);
@@ -168,6 +167,8 @@ static void syscall_write(struct intr_frame *f);
 static void syscall_seek(struct intr_frame *f);
 static void syscall_tell(struct intr_frame *f);
 static void syscall_close(struct intr_frame *f);
+static void syscall_mmap(struct intr_frame *f);
+static void syscall_munmap(struct intr_frame *f);
 
 /**
  * Lock for reading to and writing from the console.
@@ -190,8 +191,8 @@ const syscall_handler_func syscall_handlers[] = {
   &syscall_seek,
   &syscall_tell,
   &syscall_close,
-  &syscall_not_implemented,
-  &syscall_not_implemented
+  &syscall_mmap,
+  &syscall_munmap
 };
 
 void
@@ -404,14 +405,6 @@ static void page_file_read(void *page, unsigned size, void *state_) {
 static void page_file_write(void *page, unsigned size, void *state_) {
   struct file_write_state *state = (struct file_write_state *)state_;
   state->bytes_written += (unsigned)file_write(state->file, page, size);
-}
-
-/**
- * Placeholder for unimplemented system calls.
- * @param f The interrupt stack frame
- */
-static void syscall_not_implemented(struct intr_frame *f UNUSED) {
-  printf("System call not implemented.\n");
 }
 
 /**
@@ -711,6 +704,29 @@ static void syscall_close(struct intr_frame *f UNUSED) {
   // close file, free it, delete from fd_table.
   hash_delete(&thread_current()->fd_table, &entry->elem);
   close_file(&entry->elem, NULL);
+}
+
+/**
+ * Handles memory mapping file system calls.
+ * @param f The interrupt stack frame
+ */
+static void syscall_mmap(struct intr_frame *f) {
+  // mapid_t mmap(int fd, void *addr)
+  TWO_ARG(
+      int, fd,
+      void *, base_addr
+  );
+  f->eax = mmap_add_mapping(fd, base_addr);
+}
+
+/**
+ * Handles memory unmapping file system calls.
+ * @param f The interrupt stack frame
+ */
+static void syscall_munmap(struct intr_frame *f) {
+  // void munmap(mapid_t mapping)
+  ONE_ARG(mapid_t, mapping_id);
+  mmap_remove_mapping(mapping_id);
 }
 
 /**
