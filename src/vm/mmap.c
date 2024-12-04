@@ -44,7 +44,7 @@ static inline struct mmap_entry *from_hash_elem(
 
 /**
  * Returns the mapping entry corresponding to a given mapping ID in the
- * current thread's file memory-mapping table, or NULL if none exists.
+ * current process's file memory-mapping table, or NULL if none exists.
  * @param mapping_id The mapping ID to be keyed.
  * @return The (possibly `NULL`) mapping entry.
  */
@@ -88,7 +88,7 @@ static bool mmap_entry_id_smaller(
 }
 
 /**
- * Obtain the current thread's file memory-mapping table.
+ * Obtain the current process's file memory-mapping table.
  * @return The mapping hash table.
  */
 struct hash *get_mmap_table(void) {
@@ -113,7 +113,7 @@ bool mmap_init(void) {
 
 /**
  * Allocates and inserts entries for the given memory-mapped region into the
- * current thread's SPT, if the region is valid.
+ * current process's SPT, if the region is valid.
  * The calling function is responsible for freeing the destination entry
  * in the memory-mapping table.
  * @param dest_mmap_entry The (non-null) entry, not yet inserted into the
@@ -171,14 +171,14 @@ static bool create_spt_entries(
 }
 
 /**
- * Adds the current mapping to the current thread's memory-mapped file table.
+ * Adds the current mapping to the current process's memory-mapped file table.
  * @param base_addr The basal address to the region in memory.
  * @param fd The requested FD to map in memory to the region.
  * @return The nonnegative mapping ID if mapping succeeded, or MAP_FAILED
  * otherwise. This could be if allocation failed, the given FD is not in the
- * thread's FD table, or the memory location given by the basal address is
+ * process's FD table, or the memory location given by the basal address is
  * invalid (i.e., there is an overlap with the stack or existing pages in the
- * thread's SPT).
+ * process's SPT).
  */
 mapid_t mmap_add_mapping(int fd, void *base_addr) {
   // First check if the file is currently in the user's file directory,
@@ -215,7 +215,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
 /**
  * Flushes a given frame in a memory-mapped page to the disk, if it is present
  * and has been written to (the dirty bit is set to `true`).
- * @param entry The entry in the current thread's SPT.
+ * @param entry The entry in the current process's SPT.
  * @pre The entry is non-null, and the type is MMAP.
  */
 void mmap_flush_entry(struct spt_entry *entry) {
