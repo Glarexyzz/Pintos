@@ -169,6 +169,49 @@ static bool create_spt_entries(
   }
   return success;
 }
+
+/**
+ * Adds the current mapping to the current thread's memory-mapped file table.
+ * @param base_addr The basal address to the region in memory.
+ * @param fd The requested FD to map in memory to the region.
+ * @return The nonnegative mapping ID if mapping succeeded, or MAP_FAILED
+ * otherwise. This could be if allocation failed, the given FD is not in the
+ * thread's FD table, or the memory location given by the basal address is
+ * invalid (i.e., there is an overlap with the stack or existing pages in the
+ * thread's SPT).
+ */
+mapid_t mmap_add_mapping(int fd, void *base_addr) {
+  // First check if the file is currently in the user's file directory,
+  // and that we can reopen it.
+  struct fd_entry *fd_entry;
+  struct file *reopened;
+  bool open_file_success = (fd_entry = get_fd_entry(fd)) != NULL
+    && (reopened = file_reopen(fd_entry->file)) != NULL;
+  if (!open_file_success) {
+    return MAP_FAILED;
+  }
+  // We cannot map an empty file.
+  off_t len = file_tell(reopened);
+  if (len == 0) {
+    file_close(reopened);
+    return MAP_FAILED;
+  }
+  // Check if memory allocation fails.
+  struct mmap_entry *entry;
+  if ((entry = malloc(sizeof(struct mmap_entry))) == NULL) {
+    return MAP_FAILED;
+  }
+  entry->maddr = base_addr;
+  entry->file = fd_entry->file;
+  if (!create_spt_entries(entry, len)) {
+    free(entry);
+    return MAP_FAILED;
+  }
+  mapid_t mapping_id = thread_current()->mmap_id_counter++;
+  entry->mapping_id = mapping_id;
+  return mapping_id;
+}
+
 /**
  * Flushes a given frame in a memory-mapped page to the disk, if it is present
  * and has been written to (the dirty bit is set to `true`).

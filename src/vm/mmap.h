@@ -26,6 +26,8 @@ bool mmap_init(void);
 struct hash *get_mmap_table(void);
 void mmap_destroy(void);
 
+/// Functions for finding, inserting and removing mappings.
+mapid_t mmap_add_mapping(int fd, void *base_addr);
 struct mmap_entry *mmap_get_entry(mapid_t mapping_id);
 void mmap_remove_mapping(mapid_t mapping_id);
 
