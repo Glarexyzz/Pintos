@@ -200,11 +200,13 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
   // Check if memory allocation fails.
   struct mmap_entry *entry;
   if ((entry = malloc(sizeof(struct mmap_entry))) == NULL) {
+    file_close(reopened);
     return MAP_FAILED;
   }
   entry->maddr = base_addr;
   entry->file = fd_entry->file;
   if (!create_spt_entries(entry, len)) {
+    file_close(reopened);
     free(entry);
     return MAP_FAILED;
   }
