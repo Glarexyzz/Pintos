@@ -161,6 +161,7 @@ static bool create_spt_entries(
     entry->type = MMAP;
     entry->mmap.mmap_entry = dest_mmap_entry;
     entry->mmap.dirty_bit = false;
+    entry->writable = true;
     // Add the expected number of page and zero bytes.
     off_t remaining = len - cur_off;
     size_t page_file_bytes = remaining % PGSIZE;
