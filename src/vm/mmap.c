@@ -158,7 +158,7 @@ static bool create_spt_entries(
     // program's executable pages.
     uint32_t *pagedir = thread_current()->pagedir;
     struct hash *spt = &thread_current()->spt;
-    bool page_present = pagedir_get_page(pagedir, &entry->uvaddr) != NULL
+    bool page_present = pagedir_get_page(pagedir, entry->uvaddr) != NULL
       || hash_find(spt, &entry->elem) != NULL;
     if (page_present) {
       free(entry);
