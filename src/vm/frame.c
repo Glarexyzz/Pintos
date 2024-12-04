@@ -108,7 +108,7 @@ static unsigned frame_file_hash(
   void *aux UNUSED
 ) {
   struct frame *frame = hash_entry(element, struct frame, share_table_elem);
-  return file_hash(frame->file) + hash_int(frame->offset);
+  return file_hash(frame->file) ^ hash_int(frame->offset);
 }
 
 /**

@@ -1012,8 +1012,67 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       entry->writable = writable;
       entry->exec_file.page_read_bytes = page_read_bytes;
       entry->exec_file.page_zero_bytes = page_zero_bytes;
-      entry->exec_file.offset = ofs;
-      entry->exec_file.file = file;
+
+      // Share read-only pages
+      if (!writable) {
+        // Check if an entry exists in the share table
+        struct frame frame_to_find;
+        frame_to_find.offset = ofs;
+        frame_to_find.file = file;
+
+        lock_acquire(&share_table_lock);
+        struct hash_elem *found_elem = hash_find(
+          &share_table,
+          &frame_to_find.share_table_elem
+        );
+
+        // If there is already an entry
+        if (found_elem != NULL) {
+          struct frame *found_frame = hash_entry(
+            found_elem,
+            struct frame,
+            share_table_elem
+          );
+
+          // Use the entry
+          entry->exec_file.share_frame = found_frame;
+
+          // Add ourselves as an owner
+          frame_add_owner(found_frame, t);
+        } else {
+          // Create a new shared frame for the share table
+          struct frame *shared_frame = malloc(sizeof(struct frame));
+
+          if (shared_frame == NULL) {
+            PANIC("Kernel out of memory!");
+          }
+
+          shared_frame->kvaddr = NULL;
+
+          list_init(&shared_frame->owners);
+          frame_add_owner(shared_frame, t);
+
+          shared_frame->offset = ofs;
+          shared_frame->file = file;
+
+          entry->exec_file.share_frame = shared_frame;
+
+          // Add it to the share table
+          hash_insert(&share_table, &shared_frame->share_table_elem);
+        }
+
+        // Install the page into our PD if it's already in the frame table
+        if (entry->exec_file.share_frame->kvaddr != NULL) {
+          pagedir_set_page(
+            t->pagedir,
+            upage,
+            entry->exec_file.share_frame->kvaddr,
+            writable //false
+          );
+        }
+
+        lock_release(&share_table_lock);
+      }
 
       hash_insert(&t->spt, &entry->elem);
 
