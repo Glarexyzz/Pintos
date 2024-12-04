@@ -22,6 +22,7 @@ static bool mmap_entry_id_smaller(
 );
 
 static void remove_spt_entries(struct list *mapped_pages);
+static void free_mmap_elem(struct hash_elem *mmap_hash_elem, void *aux UNUSED);
 
 /**
  * Converts a generic hash-table element to a memory-mapping entry, returning
@@ -149,3 +150,17 @@ static void remove_spt_entries(struct list *mapped_pages) {
   }
   ASSERT(list_empty(mapped_pages));
 }
+
+static void free_mmap_elem(
+    struct hash_elem *mmap_hash_elem,
+    void *aux UNUSED
+) {
+  ASSERT(mmap_hash_elem != NULL);
+  // Obtain the underlying memory-mapping entry.
+  struct mmap_entry *mmap_entry = from_hash_elem(mmap_hash_elem);
+  // Remove all the mapped pages, close the file, and free the entry.
+  remove_spt_entries(&mmap_entry->pages);
+  file_close(mmap_entry->file);
+  free(mmap_entry);
+}
+
