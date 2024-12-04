@@ -327,7 +327,8 @@ static void remove_spt_entries(struct list *mapped_pages) {
     mmap_flush_entry(spt_entry);
     // Remove the mapped page from the SPT; this must have been malloced
     // beforehand.
-    hash_delete(spt, &spt_entry->elem);
+    struct hash_elem *found_elem = hash_delete(spt, &spt_entry->elem);
+    ASSERT(found_elem == &spt_entry->elem);
     free(spt_entry);
     cur = next;
   }
