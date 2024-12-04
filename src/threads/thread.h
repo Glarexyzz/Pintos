@@ -121,6 +121,10 @@ struct thread
 #ifdef VM
   /* Owned by vm. */
     struct hash spt;                    /* Supplemental page table. */
+
+	struct hash mmap_table;             /* Memory mapped file table. */
+  /* Counter for allocating memory-mapped file ID numbers. */
+	int mmap_id_counter;
 #endif
 
     /* Owned by thread.c. */

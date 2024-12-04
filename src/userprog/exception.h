@@ -9,4 +9,7 @@
 void exception_init (void);
 void exception_print_stats (void);
 
+/// The maximum size of the stack in bytes.
+#define STACK_MAX 0x00400000 // 2^22 = 4MB
+
 #endif /* userprog/exception.h */

@@ -24,6 +24,7 @@
 #ifdef VM
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/mmap.h"
 #endif
 
 
@@ -590,6 +591,9 @@ void exit_user_process(int status) {
 
   lock_release(&user_processes_lock);
 
+  // Destroy the memory-mapped file table.
+  mmap_destroy();
+
   // Close all the files and free all the file descriptors,
   // and the file descriptor table
   hash_destroy(&cur_thread->fd_table, &close_file);
@@ -781,6 +785,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
 #ifdef VM
   // Initialise supplemental page table.
   if (!hash_init(&t->spt, &spt_entry_hash, &spt_entry_kvaddr_smaller, NULL)) {
+    goto done;
+  }
+
+  // Initialise the memory mapping file table.
+  if (!mmap_init()) {
     goto done;
   }
 #endif
@@ -1055,4 +1064,25 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/**
+ * Fetches an FD entry from the current thread's FD table.
+ * @param fd The FD number.
+ * @return A pointer to the FD entry, or NULL if there is no entry for the FD
+ * number.
+ */
+struct fd_entry *get_fd_entry(int fd) {
+  // Search up the fd-file mapping from the fd table.
+  struct fd_entry fd_to_find;
+  fd_to_find.fd = fd;
+
+  struct hash_elem *fd_found_elem = hash_find(
+      &thread_current()->fd_table,
+      &fd_to_find.elem
+  );
+
+  if (fd_found_elem == NULL) return NULL;
+
+  return hash_entry(fd_found_elem, struct fd_entry, elem);
 }

@@ -47,5 +47,6 @@ void close_file(struct hash_elem *element, void *aux UNUSED);
 void exit_user_process(int status) NO_RETURN;
 void process_exit (void);
 void process_activate (void);
+struct fd_entry *get_fd_entry(int fd);
 
 #endif /* userprog/process.h */
