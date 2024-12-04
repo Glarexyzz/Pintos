@@ -317,7 +317,6 @@ bool mmap_load_entry(struct spt_entry *entry) {
  * @remark mapped_pages itself is not freed.
  */
 static void remove_spt_entries(struct list *mapped_pages) {
-  ASSERT(!list_empty(mapped_pages));
   struct list_elem *cur = list_begin(mapped_pages);
   struct hash *spt = &thread_current()->spt;
   while (cur != list_end(mapped_pages)) {
