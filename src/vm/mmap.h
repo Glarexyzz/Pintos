@@ -20,6 +20,7 @@ struct mmap_entry {
 
 /// Function for updating changes to a singular memory-mapped page to the disk.
 void mmap_flush_entry(spt_entry_ptr entry);
+bool mmap_load_entry(spt_entry_ptr entry);
 
 /// Functions for initialising, obtaining and destroying the mapping table.
 bool mmap_init(void);

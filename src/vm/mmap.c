@@ -250,6 +250,58 @@ void mmap_flush_entry(struct spt_entry *entry) {
 }
 
 /**
+ * Allocates a given frame for a memory-mapped page, if none is already present.
+ * @param entry The entry in the current process's SPT.
+ * @return `true` if an allocation occurred (i.e., no frame was allocated for
+ * the page, and allocation succeeded.)
+ * @pre The entry is non-null, and the type is MMAP.
+ */
+bool mmap_load_entry(struct spt_entry *entry) {
+  ASSERT(entry != NULL);
+  ASSERT(entry->type == MMAP);
+  uint32_t *pagedir = thread_current()->pagedir;
+  // If a frame is already allocated to the page, do nothing.
+  void *frame = pagedir_get_page(pagedir, entry->uvaddr);
+  // No allocation takes place.
+  if (frame != NULL) {
+    return false;
+  }
+  struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
+  // Verify that the reference to the parent entry is valid.
+  ASSERT(in_mmap_entry != NULL);
+  struct file *source = in_mmap_entry->file;
+  void *base_address = in_mmap_entry->maddr;
+  off_t offset = entry->uvaddr - base_address;
+  off_t bytes_to_read = entry->mmap.page_file_bytes;
+  off_t bytes_to_zero = entry->mmap.page_zero_bytes;
+  // Write file bytes to the frame.
+  lock_acquire(&file_system_lock);
+  off_t read_bytes = file_read_at(source, frame, bytes_to_read, offset);
+  lock_release(&file_system_lock);
+  if (read_bytes != bytes_to_read) {
+    free(frame);
+    return false;
+  }
+  // Write zero bytes to the rest of the frame.
+  off_t zero_bytes = file_write_at(
+    source,
+    frame + read_bytes,
+    bytes_to_zero,
+    offset + read_bytes
+  );
+  if (zero_bytes != bytes_to_zero) {
+    free(frame);
+    return false;
+  }
+  // Add to the page directory as writable.
+  if (!pagedir_set_page(pagedir, entry->uvaddr, frame, true)) {
+    free(frame);
+    return false;
+  }
+  return true;
+}
+
+/**
  * Frees a list of mapped pages corresponding to memory-mapped files, flushing
  * changes if required.
  * @param mapped_pages A list of mapped pages.
