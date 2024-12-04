@@ -23,6 +23,10 @@ struct spt_entry {
 	  struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
 	  struct list_elem elem;         /* For insertion in the list of pages
                                         in the mmap_entry. */
+      /* The portion of the page to read/write to the file. */
+      size_t page_file_bytes;
+      /* The portion of the page not included in the file. */
+      size_t page_zero_bytes;
     } mmap;
   };
 
