@@ -785,7 +785,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   }
 
-  // TODO: Initialise mmap table
+  // Initialise the memory mapping file table.
+  if (!mmap_init()) {
+    goto done;
+  }
 #endif
   
   /* Open executable file. */
