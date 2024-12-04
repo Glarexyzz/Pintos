@@ -206,14 +206,16 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   int page_read_bytes = spt_entry->exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->exec_file.page_zero_bytes;
 
+  struct file *file = spt_entry->exec_file.file;
+
   uint8_t *kpage = user_get_page(0);
 
   // Read the executable file into memory.
   int read_bytes = 0;
   if (page_read_bytes != 0) {
     lock_acquire(&file_system_lock);
-    file_seek(cur->executable_file, spt_entry->exec_file.offset);
-    read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+    file_seek(file, spt_entry->exec_file.offset);
+    read_bytes = file_read(file, kpage, page_read_bytes);
     lock_release(&file_system_lock);
   }
   if (read_bytes != page_read_bytes)

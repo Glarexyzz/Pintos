@@ -1013,6 +1013,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       entry->exec_file.page_read_bytes = page_read_bytes;
       entry->exec_file.page_zero_bytes = page_zero_bytes;
       entry->exec_file.offset = ofs;
+      entry->exec_file.file = file;
 
       hash_insert(&t->spt, &entry->elem);
 
