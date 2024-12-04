@@ -1,6 +1,21 @@
 #include "mmap.h"
+#include "page.h"
+#include "threads/thread.h"
+#include "threads/malloc.h"
+#include "threads/vaddr.h"
+#include "userprog/exception.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 
-unsigned mmap_entry_hash(const struct hash_elem *element, void *aux UNUSED);
+static unsigned mmap_entry_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
+static bool mmap_entry_id_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
 
 /**
  * A hash_hash_func for mmap_entry struct.
@@ -8,9 +23,12 @@ unsigned mmap_entry_hash(const struct hash_elem *element, void *aux UNUSED);
  * @param aux Unused.
  * @return The hash of the mmap_entry.
  */
-unsigned mmap_entry_hash(const struct hash_elem *element, void *aux UNUSED) {
-  const void *maddr = hash_entry(element, struct mmap_entry, elem)->maddr;
-  return hash_bytes(&maddr, sizeof (const void *));
+static unsigned mmap_entry_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  ASSERT(element != NULL);
+  return hash_int(from_hash_elem(element)->mapping_id);
 }
 
 /**
@@ -18,14 +36,15 @@ unsigned mmap_entry_hash(const struct hash_elem *element, void *aux UNUSED) {
  * @param a The pointer to the hash_elem in the first mmap_entry struct.
  * @param b The pointer to the hash_elem in the second mmap_entry struct.
  * @param aux Unused.
- * @return True iff a < b.
+ * @return True iff the mapping ID of a < the mapping ID of b.
  */
-bool mmap_entry_maddr_smaller(
+static bool mmap_entry_id_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
   void *aux UNUSED
 ) {
-  const void *a_uvaddr = hash_entry(a, struct mmap_entry, elem)->maddr;
-  const void *b_uvaddr = hash_entry(b, struct mmap_entry, elem)->maddr;
-  return a_uvaddr < b_uvaddr;
+  ASSERT(a != NULL && b != NULL);
+  mapid_t a_id = from_hash_elem(a)->mapping_id;
+  mapid_t b_id = from_hash_elem(b)->mapping_id;
+  return a_id < b_id;
 }
