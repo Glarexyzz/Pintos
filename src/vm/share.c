@@ -1,4 +1,5 @@
 #include "filesys/file.h"
+#include "filesys/directory.h"
 #include "threads/malloc.h"
 #include "userprog/process.h"
 #include "vm/share.h"
@@ -7,6 +8,15 @@
 struct owner {
   struct thread *process; /* The thread/process which owns a page */
   struct list_elem elem;  /* For insertion into the frame's owner list */
+};
+
+/// A file shared between multiple processes
+struct shared_file {
+  struct file *file;       /* The open file which is to be shared */
+  char filename[NAME_MAX]; /* The name of the file in the filesystem */
+  unsigned shared_pages;   /* The number of pages in the share_table using the
+                            * file. */
+  struct hash_elem elem;   /* For insertion into the shared_file_table */
 };
 
 static unsigned shared_frame_file_hash(
@@ -23,6 +33,51 @@ static bool shared_frame_owner_smaller(
   const struct list_elem *b,
   void *aux UNUSED
 );
+
+/**
+ * A hash_hash_func for shared_file struct.
+ * @param element The pointer to the hash_elem in the shared_file struct.
+ * @param aux Unused.
+ * @return The hash of the shared_file.
+ */
+static unsigned shared_file_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+) {
+  struct shared_file *shared_file = hash_entry(
+    element,
+    struct shared_file,
+    elem
+  );
+  return hash_bytes(shared_file->filename, NAME_MAX);
+}
+
+/**
+ * A hash_less_func for shared_file struct.
+ * @param a The pointer to the hash_elem in the first shared_file struct.
+ * @param b The pointer to the hash_elem in the second shared_file struct.
+ * @param aux Unused.
+ * @return True iff a < b.
+ */
+static bool shared_file_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+) {
+  struct shared_file *a_shared_file = hash_entry(
+    a,
+    struct shared_file,
+    elem
+  );
+  struct shared_file *b_shared_file = hash_entry(
+    b,
+    struct shared_file,
+    elem
+  );
+
+  return hash_bytes(a_shared_file->filename, 14) <
+    hash_bytes(b_shared_file->filename, 14);
+}
 
 /**
  * A hash_hash_func for shared_frame struct, based on the file and offset.
@@ -89,6 +144,17 @@ void share_table_init() {
     PANIC("Could not initialise share table!");
   }
   lock_init(&share_table_lock);
+
+  success = hash_init(
+    &shared_file_table,
+    &shared_file_hash,
+    &shared_file_smaller,
+    NULL
+  );
+  if (!success) {
+    PANIC("Could not initialise share table!");
+  }
+  lock_init(&shared_file_table_lock);
 }
 
 /**

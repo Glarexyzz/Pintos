@@ -8,6 +8,11 @@ struct hash share_table;
 /// The lock for the share table
 struct lock share_table_lock;
 
+/// A table of the open files which are shared
+struct hash shared_file_table;
+/// The lock for the shared file table
+struct lock shared_file_table_lock;
+
 struct shared_frame {
   struct list owners;                /* List of processes which own the frame. */
   struct file *file;                 /* The file to which the frame belongs. */
