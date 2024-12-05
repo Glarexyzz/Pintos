@@ -15,11 +15,10 @@ struct uninitialised_executable {
 
 /// spt_entry data for a writable uninitialised executable.
 struct writable_executable {
-  int page_read_bytes;               /* Number of bytes to read. */
-  int page_zero_bytes;               /* Number of bytes to set to zero. */
-  struct file *file;                 /* The file to which the frame belongs. */
-  int offset;                        /* The offset of the frame within the
-                                      * file. */
+  int page_read_bytes; /* Number of bytes to read. */
+  int page_zero_bytes; /* Number of bytes to set to zero. */
+  struct file *file;   /* The file to which the frame belongs. */
+  int offset;          /* The offset of the frame within the file. */
 };
 
 /// Describes where the data referred to by the SPT is located.

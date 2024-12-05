@@ -17,7 +17,7 @@ struct frame {
                                       * applicable. */
 
   struct list_elem queue_elem;       /* For insertion into eviction queue. */
-  struct hash_elem table_elem; /* For insertion into frame table. */
+  struct hash_elem table_elem;       /* For insertion into frame table. */
 };
 
 /// The frame table

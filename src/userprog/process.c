@@ -1043,14 +1043,10 @@ static bool load_segment (
             elem
           );
 
+          // Use the entry and add ourselves as an owner
           lock_acquire(&found_shared_frame->lock);
-
-          // Use the entry
           entry->shared_exec_file.shared_frame = found_shared_frame;
-
-          // Add ourselves as an owner
           shared_frame_add_owner(found_shared_frame, t);
-
           lock_release(&found_shared_frame->lock);
 
         } else {

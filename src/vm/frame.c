@@ -4,12 +4,8 @@
 #include "userprog/pagedir.h"
 #include "vm/frame.h"
 #include "vm/share.h"
-#include <stdio.h>
 
-static unsigned frame_kvaddr_hash(
-  const struct hash_elem *element,
-  void *aux UNUSED
-);
+static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED);
 static bool frame_kvaddr_smaller(
   const struct hash_elem *a,
   const struct hash_elem *b,
@@ -18,21 +14,18 @@ static bool frame_kvaddr_smaller(
 
 
 /**
- * A hash_hash_func for frame struct, based on the kvaddr.
+ * A hash_hash_func for frame struct.
  * @param element The pointer to the table_elem in the frame struct.
  * @param aux Unused.
  * @return The hash of the frame.
  */
-static unsigned frame_kvaddr_hash(
-  const struct hash_elem *element,
-  void *aux UNUSED
-) {
+static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED) {
   void *kvaddr = hash_entry(element, struct frame, table_elem)->kvaddr;
   return hash_bytes(&kvaddr, sizeof (void *));
 }
 
 /**
- * A hash_less_func for frame struct, based on the kvaddr.
+ * A hash_less_func for frame struct.
  * @param a The pointer to the hash_elem in the first frame struct.
  * @param b The pointer to the hash_elem in the second frame struct.
  * @param aux Unused.
@@ -55,7 +48,7 @@ static bool frame_kvaddr_smaller(
 void frame_table_init() {
   bool success = hash_init(
     &frame_table,
-    &frame_kvaddr_hash,
+    &frame_hash,
     &frame_kvaddr_smaller,
     NULL
   );
@@ -160,11 +153,12 @@ void user_free_page(void *page) {
     // If the list of owners is now empty, we can delete both the frame and the
     // shared_frame.
     if (list_empty(&shared_frame->owners)) {
-      struct hash_elem *thing = hash_delete(&share_table, &shared_frame->elem);
-      ASSERT(thing != NULL);
 
+      // Delete the shared_frame
+      ASSERT(hash_delete(&share_table, &shared_frame->elem) != NULL);
       close_shared_file(shared_frame->file);
 
+      // Delete the frame and free the shared_frame
       hash_delete(&frame_table, found_frame_elem);
       palloc_free_page(page);
       lock_release(&shared_frame->lock);
@@ -172,6 +166,7 @@ void user_free_page(void *page) {
       free(shared_frame);
 
     } else {
+      // The shared_frame still has owners.
       lock_release(&shared_frame->lock);
       lock_release(&share_table_lock);
     }

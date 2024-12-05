@@ -9,13 +9,12 @@ struct hash share_table;
 struct lock share_table_lock;
 
 struct shared_frame {
-  struct list owners;                /* List of processes which own the frame. */
-  struct file *file;                 /* The file to which the frame belongs. */
-  int offset;                        /* The offset of the frame within the
-                                      * file. */
-  struct lock lock;                  /* Lock for the shared frame. */
-  struct frame *frame;               /* The frame in the frame table. */
-  struct hash_elem elem;             /* For insertion into the share table. */
+  struct list owners;    /* List of processes which own the frame. */
+  struct file *file;     /* The file to which the frame belongs. */
+  int offset;            /* The offset of the frame within the file. */
+  struct lock lock;      /* Lock for the shared frame. */
+  struct frame *frame;   /* The frame in the frame table. */
+  struct hash_elem elem; /* For insertion into the share table. */
 };
 
 void share_table_init(void);

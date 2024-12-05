@@ -1,5 +1,4 @@
 #include <string.h>
-#include <stdio.h>
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -247,11 +246,9 @@ void shared_frame_delete_owner(
 
 
 /**
- * Get the open file from the shared file table.
- * @param file_name The name of the file.
- * @param new_share_table_entry Whether a new shared frame is being created for
- * this file.
- * @return The open file.
+ * Open a shared file, or create a new shared file if it doesn't exist.
+ * @param filename The name of the file to open.
+ * @return The file that was opened.
  */
 struct file *open_shared_file(char *filename) {
   lock_acquire(&file_system_lock);
@@ -284,6 +281,7 @@ struct file *open_shared_file(char *filename) {
     file_close(file);
     lock_release(&file_system_lock);
   } else {
+
     // Otherwise, create a new shared file
     shared_file = malloc(sizeof(shared_file));
     if (shared_file == NULL) {
@@ -304,8 +302,10 @@ struct file *open_shared_file(char *filename) {
 /**
  * Increase the open count of a shared file.
  * @param file The file to increase the open count of.
+ * @pre The file is in the shared file table.
  */
 void increase_open_count(struct file *file) {
+  // Find the shared file in the shared file table
   struct shared_file shared_file_to_find;
   shared_file_to_find.file = file;
 
@@ -316,7 +316,7 @@ void increase_open_count(struct file *file) {
   );
 
   if (found_elem == NULL) {
-    PANIC("Tried to increase the open count of a shared file that doesn't exist!");
+    PANIC("Shared file doesn't exist!");
   }
 
   struct shared_file *shared_file = hash_entry(
@@ -325,10 +325,15 @@ void increase_open_count(struct file *file) {
     elem
   );
 
+  // Increase the open count
   shared_file->num_opens++;
   lock_release(&shared_file_table_lock);
 }
 
+/**
+ * Close a shared file.
+ * @param file The file to close.
+ */
 void close_shared_file(struct file *file) {
   // Find the shared file in the shared file table
   struct shared_file shared_file_to_find;
@@ -352,6 +357,7 @@ void close_shared_file(struct file *file) {
 
   shared_file->num_opens--;
 
+  // If the file has no more open references, close it and free the shared file
   if (shared_file->num_opens == 0) {
     hash_delete(&shared_file_table, found_elem);
     lock_acquire(&file_system_lock);

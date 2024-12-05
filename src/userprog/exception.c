@@ -194,6 +194,11 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
   return true;
 }
 
+/**
+ * Handles loading of a writable executable file into memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
+ */
 static bool load_writable_executable(struct spt_entry *spt_entry) {
   int page_read_bytes = spt_entry->writable_exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->writable_exec_file.page_zero_bytes;
@@ -228,6 +233,11 @@ static bool load_writable_executable(struct spt_entry *spt_entry) {
   return true;
 }
 
+/**
+ * Handles loading of a shared executable file into memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
+ */
 static bool load_shared_executable(struct spt_entry *spt_entry) {
   int page_read_bytes = spt_entry->shared_exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->shared_exec_file.page_zero_bytes;
@@ -274,6 +284,12 @@ static bool load_shared_executable(struct spt_entry *spt_entry) {
   return true;
 }
 
+/**
+ * Handles using a shared executable file that has already been loaded into
+ * memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
+ */
 static bool use_shared_executable(struct spt_entry *spt_entry) {
   return pagedir_set_page(
     thread_current()->pagedir,
