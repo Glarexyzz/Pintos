@@ -199,20 +199,13 @@ void user_free_page(void *page) {
     lock_acquire(&shared_frame->lock);
     shared_frame_delete_owner(shared_frame, cur_thread);
 
-//    printf("After deleting owner\n"); print_shared_frame_table();
-
     // If the list of owners is now empty, we can delete both the frame and the
     // shared_frame.
     if (list_empty(&shared_frame->owners)) {
-//      printf(">>>>> No owners\n");
-//      printf("Removing: %p\n", shared_frame);
-//      print_shared_frame(&shared_frame->elem, NULL);
-//      printf("================= Before removing from share table =============\n");
-//      print_shared_frame_table();
       struct hash_elem *thing = hash_delete(&share_table, &shared_frame->elem);
-//      printf("================= After removing from share table =============\n");
-//      print_shared_frame_table();
       ASSERT(thing != NULL);
+
+      close_shared_file(shared_frame->file);
 
       hash_delete(&frame_table, found_frame_elem);
       palloc_free_page(page);

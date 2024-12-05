@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -15,8 +16,7 @@ struct owner {
 /// A file shared between multiple processes
 struct shared_file {
   struct file *file;       /* The open file which is to be shared */
-  unsigned shared_pages;   /* The number of pages in the share_table using the
-                            * file. */
+  int num_opens;           /* The number of active references to the file */
   struct hash_elem elem;   /* For insertion into the shared_file_table */
 };
 
@@ -64,6 +64,7 @@ static unsigned shared_file_hash(
     struct shared_file,
     elem
   );
+//  printf("inode %p hashes to %d\n", file_get_inode(shared_file->file), file_hash(shared_file->file));
   return file_hash(shared_file->file);
 }
 
@@ -90,7 +91,7 @@ static bool shared_file_smaller(
     elem
   );
 
-  return a_shared_file->file < b_shared_file->file;
+  return file_get_inode(a_shared_file->file) < file_get_inode(b_shared_file->file);
 }
 
 /**
@@ -253,7 +254,13 @@ void shared_frame_delete_owner(
  * this file.
  * @return The open file.
  */
-struct file *get_shared_file(struct file *file, bool new_share) {
+struct file *open_shared_file(char *filename) {
+  struct file *file = filesys_open(filename);
+//  printf("The inode of the file is %p\n", file_get_inode(file));
+  if (file == NULL) {
+    return NULL;
+  }
+
   // Try to find the shared file in the shared file table
   struct shared_file shared_file_to_find;
   shared_file_to_find.file = file;
@@ -273,20 +280,83 @@ struct file *get_shared_file(struct file *file, bool new_share) {
       struct shared_file,
       elem
     );
+//    file_close(file);
   } else {
+//    printf("Creating new shared file\n");
     // Otherwise, create a new shared file
     shared_file = malloc(sizeof(shared_file));
     if (shared_file == NULL) {
       PANIC("Kernel out of memory!");
     }
 
-    shared_file->file = file_reopen(file);
+    shared_file->file = file;
+    shared_file->num_opens = 0;
     hash_insert(&shared_file_table, &shared_file->elem);
   }
 
-  if (new_share) shared_file->shared_pages++;
-
+  shared_file->num_opens++;
   lock_release(&shared_file_table_lock);
 
   return shared_file->file;
+}
+
+/**
+ * Increase the open count of a shared file.
+ * @param file The file to increase the open count of.
+ */
+void increase_open_count(struct file *file) {
+  struct shared_file shared_file_to_find;
+  shared_file_to_find.file = file;
+
+  lock_acquire(&shared_file_table_lock);
+  struct hash_elem *found_elem = hash_find(
+    &shared_file_table,
+    &shared_file_to_find.elem
+  );
+
+  if (found_elem == NULL) {
+    PANIC("Tried to increase the open count of a shared file that doesn't exist!");
+  }
+
+  struct shared_file *shared_file = hash_entry(
+    found_elem,
+    struct shared_file,
+    elem
+  );
+
+  shared_file->num_opens++;
+  lock_release(&shared_file_table_lock);
+}
+
+void close_shared_file(struct file *file) {
+  // Find the shared file in the shared file table
+  struct shared_file shared_file_to_find;
+  shared_file_to_find.file = file;
+
+  lock_acquire(&shared_file_table_lock);
+  struct hash_elem *found_elem = hash_find(
+    &shared_file_table,
+    &shared_file_to_find.elem
+  );
+
+  if (found_elem == NULL) {
+    PANIC("Tried to close a shared file that doesn't exist!");
+  }
+
+  struct shared_file *shared_file = hash_entry(
+    found_elem,
+    struct shared_file,
+    elem
+  );
+
+  shared_file->num_opens--;
+
+  if (shared_file->num_opens == 0) {
+    printf("Closing shared file\n");
+    hash_delete(&shared_file_table, found_elem);
+    file_close(file);
+    free(shared_file);
+  }
+
+  lock_release(&shared_file_table_lock);
 }

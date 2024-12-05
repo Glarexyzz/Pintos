@@ -597,7 +597,7 @@ void exit_user_process(int status) {
 
   // Close the executable file pointer, allowing writes again.
   ASSERT(cur_thread->executable_file != NULL);
-  file_close(cur_thread->executable_file);
+  close_shared_file(cur_thread->executable_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
@@ -796,7 +796,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   copy_executable_name(file_name, executable_name);
 
   lock_acquire(&file_system_lock);
-  file = filesys_open (executable_name);
+  file = open_shared_file(executable_name);
   lock_release(&file_system_lock);
 
   // Store file pointer in thread.
@@ -814,7 +814,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   lock_release(&file_system_lock);
 
   /* Read and verify executable header. */
-  if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
+  if (file_read_at (file, &ehdr, sizeof ehdr, 0) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
       || ehdr.e_machine != 3
@@ -822,6 +822,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
+      printf("%p\n", file_get_inode(file));
       printf ("load: %s: error loading executable\n", executable_name);
       goto done; 
     }
@@ -1029,7 +1030,7 @@ static bool load_segment (
         // Check if an entry exists in the share table
         struct shared_frame shared_frame_to_find;
         shared_frame_to_find.offset = ofs;
-        shared_frame_to_find.file = get_shared_file(file, false);
+        shared_frame_to_find.file = file;
 
         lock_acquire(&share_table_lock);
         struct hash_elem *found_elem = hash_find(
@@ -1076,7 +1077,8 @@ static bool load_segment (
 
           // Set the file and offset of the shared frame
           shared_frame->offset = ofs;
-          shared_frame->file = get_shared_file(file, true);
+          shared_frame->file = file;
+          increase_open_count(file);
 
           // Add the shared frame to the SPT entry
           entry->shared_exec_file.shared_frame = shared_frame;
