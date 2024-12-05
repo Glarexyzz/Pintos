@@ -5,6 +5,8 @@
 #include <hash.h>
 #include "filesys/file.h"
 #include "vm/frame.h"
+#include "filesys/off_t.h"
+#include "vm/mmap.h"
 
 /// spt_entry data for a read-only uninitialised executable.
 struct uninitialised_executable {
@@ -21,9 +23,21 @@ struct writable_executable {
   int offset;          /* The offset of the frame within the file. */
 };
 
+/// Page mapped to a file in memory.
+struct memory_mapped_file {
+  struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
+  struct list_elem elem;         /* For insertion in the list of pages
+                                        in the mmap_entry. */
+  /* The portion of the page to read/write to the file. */
+  size_t page_file_bytes;
+  /* The portion of the page not included in the file. */
+  size_t page_zero_bytes;
+};
+
 /// Describes where the data referred to by the SPT is located.
 enum spt_entry_type {
-  UNINITIALISED_EXECUTABLE
+  UNINITIALISED_EXECUTABLE,
+  MMAP, // A page mapped to a part of a file in the user's address space.
 };
 
 /// Entry for the supplemental page table.
@@ -35,6 +49,7 @@ struct spt_entry {
   union {                   /* The spt_entry_type-specific data. */
     struct uninitialised_executable shared_exec_file;
     struct writable_executable writable_exec_file;
+    struct memory_mapped_file mmap;
   };
 
   struct hash_elem elem;    /* For insertion into the supplemental page

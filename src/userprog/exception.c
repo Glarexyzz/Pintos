@@ -13,15 +13,13 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/mmap.h"
 #include "vm/page.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
 #define PUSH_SIZE 4
 /// The number of bytes written to the stack in a PUSHA instruction.
 #define PUSHA_SIZE 32
-
-/// The maximum size of the stack in bytes.
-#define STACK_MAX 0x00400000 // 2^22 = 4MB
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -400,6 +398,9 @@ page_fault (struct intr_frame *f)
   switch (found_entry->type) {
     case UNINITIALISED_EXECUTABLE:
       if (!load_uninitialised_executable(found_entry)) goto fail;
+      break;
+    case MMAP:
+      if (!mmap_load_entry(found_entry)) goto fail;
       break;
   }
 
