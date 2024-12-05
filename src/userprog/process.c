@@ -755,16 +755,22 @@ struct Elf32_Phdr
 
 static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
-static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
-                          uint32_t read_bytes, uint32_t zero_bytes,
-                          bool writable);
+static bool load_segment (
+  struct file *file,
+  off_t ofs,
+  uint8_t *upage,
+  uint32_t read_bytes,
+  uint32_t zero_bytes,
+  bool writable,
+  const char *file_name
+);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *file_name, void (**eip) (void), void **esp)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -871,7 +877,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable))
+                                 read_bytes, zero_bytes, writable, file_name))
                 goto done;
             }
           else
@@ -969,10 +975,15 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-static bool
-load_segment (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
-{
+static bool load_segment (
+  struct file *file,
+  off_t ofs,
+  uint8_t *upage,
+  uint32_t read_bytes,
+  uint32_t zero_bytes,
+  bool writable,
+  const char *file_name
+) {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
@@ -1020,7 +1031,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         // Check if an entry exists in the share table
         struct shared_frame shared_frame_to_find;
         shared_frame_to_find.offset = ofs;
-        shared_frame_to_find.file = file;
+        shared_frame_to_find.file = get_shared_file(file_name, false);
 
         lock_acquire(&share_table_lock);
         struct hash_elem *found_elem = hash_find(
@@ -1045,6 +1056,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           shared_frame_add_owner(found_shared_frame, t);
 
           lock_release(&found_shared_frame->lock);
+
         } else {
           // Create a new shared frame for the share table
           struct shared_frame *shared_frame =
@@ -1054,19 +1066,24 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
             PANIC("Kernel out of memory!");
           }
 
+          // The shared frame doesn't yet have a frame in the frame table
           shared_frame->frame = NULL;
 
+          // Initialise the shared frame owners list and lock
           list_init(&shared_frame->owners);
           lock_init(&shared_frame->lock);
 
+          // Add caller as an owner of the shared frame
           shared_frame_add_owner(shared_frame, t);
 
+          // Set the file and offset of the shared frame
           shared_frame->offset = ofs;
-          shared_frame->file = file;
+          shared_frame->file = get_shared_file(file_name, true);
 
+          // Add the shared frame to the SPT entry
           entry->shared_exec_file.shared_frame = shared_frame;
 
-          // Add it to the share table
+          // Add shared frame to the share table
           printf("Inserting: %p\n", shared_frame);
           hash_insert(&share_table, &shared_frame->elem);
         }
@@ -1085,6 +1102,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
         lock_release(&share_table_lock);
       } else {
+
+        // The file is writable - no sharing
         entry->writable_exec_file.page_read_bytes = page_read_bytes;
         entry->writable_exec_file.page_zero_bytes = page_zero_bytes;
         entry->writable_exec_file.file = file;

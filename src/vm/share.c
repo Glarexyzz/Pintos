@@ -1,5 +1,7 @@
-#include "filesys/file.h"
+#include <string.h>
 #include "filesys/directory.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 #include "threads/malloc.h"
 #include "userprog/process.h"
 #include "vm/share.h"
@@ -19,6 +21,20 @@ struct shared_file {
   struct hash_elem elem;   /* For insertion into the shared_file_table */
 };
 
+/// A table of the open files which are shared
+static struct hash shared_file_table;
+/// The lock for the shared file table
+static struct lock shared_file_table_lock;
+
+static unsigned shared_file_hash(
+  const struct hash_elem *element,
+  void *aux UNUSED
+);
+static bool shared_file_smaller(
+  const struct hash_elem *a,
+  const struct hash_elem *b,
+  void *aux UNUSED
+);
 static unsigned shared_frame_file_hash(
   const struct hash_elem *element,
   void *aux UNUSED
@@ -229,4 +245,52 @@ void shared_frame_delete_owner(
 
   // Element to delete not found, so we panic.
   PANIC("Can't delete an owner that isn't in the shared_frame!");
+}
+
+
+/**
+ * Get the open file from the shared file table.
+ * @param file_name The name of the file.
+ * @param new_share_table_entry Whether a new shared frame is being created for
+ * this file.
+ * @return The open file.
+ */
+struct file *get_shared_file(char *file_name, bool new_share) {
+  // Try to find the shared file in the shared file table
+  struct shared_file shared_file_to_find;
+  memcpy(&shared_file_to_find.filename, file_name, NAME_MAX);
+
+  lock_acquire(&shared_file_table_lock);
+  struct hash_elem *found_elem = hash_find(
+    &shared_file_table,
+    &shared_file_to_find.elem
+  );
+
+  struct shared_file *shared_file;
+
+  if (found_elem != NULL) {
+    // If the shared file exists already, use it
+    shared_file = hash_entry(
+      found_elem,
+      struct shared_file,
+      elem
+    );
+  } else {
+    // Otherwise, create a new shared file
+    shared_file = malloc(sizeof(shared_file));
+    if (shared_file == NULL) {
+      PANIC("Kernel out of memory!");
+    }
+
+    shared_file->file = filesys_open(file_name);
+    memcpy(&shared_file->filename, file_name, NAME_MAX);
+
+    hash_insert(&shared_file_table, &shared_file->elem);
+  }
+
+  if (new_share) shared_file->shared_pages++;
+
+  lock_release(&shared_file_table_lock);
+
+  return shared_file->file;
 }
