@@ -15,7 +15,6 @@ struct owner {
 /// A file shared between multiple processes
 struct shared_file {
   struct file *file;       /* The open file which is to be shared */
-  char filename[NAME_MAX]; /* The name of the file in the filesystem */
   unsigned shared_pages;   /* The number of pages in the share_table using the
                             * file. */
   struct hash_elem elem;   /* For insertion into the shared_file_table */
@@ -65,7 +64,7 @@ static unsigned shared_file_hash(
     struct shared_file,
     elem
   );
-  return hash_bytes(shared_file->filename, NAME_MAX);
+  return file_hash(shared_file->file);
 }
 
 /**
@@ -91,8 +90,7 @@ static bool shared_file_smaller(
     elem
   );
 
-  return hash_bytes(a_shared_file->filename, 14) <
-    hash_bytes(b_shared_file->filename, 14);
+  return a_shared_file->file < b_shared_file->file;
 }
 
 /**
@@ -255,10 +253,10 @@ void shared_frame_delete_owner(
  * this file.
  * @return The open file.
  */
-struct file *get_shared_file(char *file_name, bool new_share) {
+struct file *get_shared_file(struct file *file, bool new_share) {
   // Try to find the shared file in the shared file table
   struct shared_file shared_file_to_find;
-  memcpy(&shared_file_to_find.filename, file_name, NAME_MAX);
+  shared_file_to_find.file = file;
 
   lock_acquire(&shared_file_table_lock);
   struct hash_elem *found_elem = hash_find(
@@ -282,9 +280,7 @@ struct file *get_shared_file(char *file_name, bool new_share) {
       PANIC("Kernel out of memory!");
     }
 
-    shared_file->file = filesys_open(file_name);
-    memcpy(&shared_file->filename, file_name, NAME_MAX);
-
+    shared_file->file = file_reopen(file);
     hash_insert(&shared_file_table, &shared_file->elem);
   }
 

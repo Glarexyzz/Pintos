@@ -27,6 +27,6 @@ void shared_frame_delete_owner(
   struct shared_frame *shared_frame,
   struct thread *t
 );
-struct file *get_shared_file(char *file_name, bool new_share);
+struct file *get_shared_file(struct file *file, bool new_share);
 
 #endif //VM_SHARE_H

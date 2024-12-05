@@ -761,8 +761,7 @@ static bool load_segment (
   uint8_t *upage,
   uint32_t read_bytes,
   uint32_t zero_bytes,
-  bool writable,
-  const char *file_name
+  bool writable
 );
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
@@ -877,7 +876,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
                   zero_bytes = ROUND_UP (page_offset + phdr.p_memsz, PGSIZE);
                 }
               if (!load_segment (file, file_page, (void *) mem_page,
-                                 read_bytes, zero_bytes, writable, file_name))
+                                 read_bytes, zero_bytes, writable))
                 goto done;
             }
           else
@@ -981,8 +980,7 @@ static bool load_segment (
   uint8_t *upage,
   uint32_t read_bytes,
   uint32_t zero_bytes,
-  bool writable,
-  const char *file_name
+  bool writable
 ) {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
@@ -1031,7 +1029,7 @@ static bool load_segment (
         // Check if an entry exists in the share table
         struct shared_frame shared_frame_to_find;
         shared_frame_to_find.offset = ofs;
-        shared_frame_to_find.file = get_shared_file(file_name, false);
+        shared_frame_to_find.file = get_shared_file(file, false);
 
         lock_acquire(&share_table_lock);
         struct hash_elem *found_elem = hash_find(
@@ -1078,13 +1076,13 @@ static bool load_segment (
 
           // Set the file and offset of the shared frame
           shared_frame->offset = ofs;
-          shared_frame->file = get_shared_file(file_name, true);
+          shared_frame->file = get_shared_file(file, true);
 
           // Add the shared frame to the SPT entry
           entry->shared_exec_file.shared_frame = shared_frame;
 
           // Add shared frame to the share table
-          printf("Inserting: %p\n", shared_frame);
+//          printf("Inserting: %p\n", shared_frame);
           hash_insert(&share_table, &shared_frame->elem);
         }
 
@@ -1097,7 +1095,7 @@ static bool load_segment (
             writable //false
           );
           if (!success) return false;
-          printf(">>>>>> %d Loaded in %p\n", thread_current()->tid, pagedir_get_page(thread_current()->pagedir, upage));
+//          printf(">>>>>> %d Loaded in %p\n", thread_current()->tid, pagedir_get_page(thread_current()->pagedir, upage));
         }
 
         lock_release(&share_table_lock);

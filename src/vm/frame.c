@@ -137,15 +137,15 @@ static void print_shared_frame_table(void) {
  */
 void *user_get_page(enum palloc_flags flags) {
   struct frame *new_frame = create_frame(flags);
-  printf("Attempting to insert %p to frame table\n", new_frame);
+//  printf("Attempting to insert %p to frame table\n", new_frame);
 
   // Insert the page into the page table
   lock_acquire(&frame_table_lock);
   hash_insert(&frame_table, &new_frame->table_elem);
   lock_release(&frame_table_lock);
 
-  printf("After inserting %p, frame table:\n", new_frame);
-  print_frame_table();
+//  printf("After inserting %p, frame table:\n", new_frame);
+//  print_frame_table();
 
   return new_frame->kvaddr;
 }
@@ -157,16 +157,16 @@ void *user_get_page(enum palloc_flags flags) {
  * @remark Also updates the frame table.
  */
 void user_free_page(void *page) {
-  printf(">>>>>>>>> %d Freeing %p\n", thread_current()->tid, page);
+//  printf(">>>>>>>>> %d Freeing %p\n", thread_current()->tid, page);
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
 
 #ifdef VM
-  printf("Attempting to free page %p, current frame table:\n", page);
-  print_frame_table();
-  printf("Current shared frame table:\n");
-  print_shared_frame_table();
+//  printf("Attempting to free page %p, current frame table:\n", page);
+//  print_frame_table();
+//  printf("Current shared frame table:\n");
+//  print_shared_frame_table();
 
   // Find and update the frame in the frame table
   struct frame frame_to_find;
@@ -185,7 +185,7 @@ void user_free_page(void *page) {
   );
 
   if (found_frame->shared_frame == NULL) {
-    printf(">>>>> One owner only\n");
+//    printf(">>>>> One owner only\n");
     // Frame only has a single owner, so we can delete the frame.
     ASSERT(found_frame->owner != NULL);
     hash_delete(&frame_table, found_frame_elem);
@@ -199,19 +199,19 @@ void user_free_page(void *page) {
     lock_acquire(&shared_frame->lock);
     shared_frame_delete_owner(shared_frame, cur_thread);
 
-    printf("After deleting owner\n"); print_shared_frame_table();
+//    printf("After deleting owner\n"); print_shared_frame_table();
 
     // If the list of owners is now empty, we can delete both the frame and the
     // shared_frame.
     if (list_empty(&shared_frame->owners)) {
-      printf(">>>>> No owners\n");
-      printf("Removing: %p\n", shared_frame);
-      print_shared_frame(&shared_frame->elem, NULL);
-      printf("================= Before removing from share table =============\n");
-      print_shared_frame_table();
+//      printf(">>>>> No owners\n");
+//      printf("Removing: %p\n", shared_frame);
+//      print_shared_frame(&shared_frame->elem, NULL);
+//      printf("================= Before removing from share table =============\n");
+//      print_shared_frame_table();
       struct hash_elem *thing = hash_delete(&share_table, &shared_frame->elem);
-      printf("================= After removing from share table =============\n");
-      print_shared_frame_table();
+//      printf("================= After removing from share table =============\n");
+//      print_shared_frame_table();
       ASSERT(thing != NULL);
 
       hash_delete(&frame_table, found_frame_elem);
