@@ -24,6 +24,7 @@
 #ifdef VM
 #include "vm/frame.h"
 #include "vm/page.h"
+#include "vm/share.h"
 #endif
 
 
@@ -1001,7 +1002,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         hash_delete(&t->spt, found_elem);
       }
 
-      // Construct the element to insert into the spt.
+      // Construct the element to insert into the SPT.
       struct spt_entry *entry = malloc(sizeof(struct spt_entry));
       if (entry == NULL) {
         // Kernel out of memory!
@@ -1010,68 +1011,84 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       entry->uvaddr = upage;
       entry->type = UNINITIALISED_EXECUTABLE;
       entry->writable = writable;
-      entry->exec_file.page_read_bytes = page_read_bytes;
-      entry->exec_file.page_zero_bytes = page_zero_bytes;
 
       // Share read-only pages
       if (!writable) {
+        entry->shared_exec_file.page_read_bytes = page_read_bytes;
+        entry->shared_exec_file.page_zero_bytes = page_zero_bytes;
+
         // Check if an entry exists in the share table
-        struct frame frame_to_find;
-        frame_to_find.offset = ofs;
-        frame_to_find.file = file;
+        struct shared_frame shared_frame_to_find;
+        shared_frame_to_find.offset = ofs;
+        shared_frame_to_find.file = file;
 
         lock_acquire(&share_table_lock);
         struct hash_elem *found_elem = hash_find(
           &share_table,
-          &frame_to_find.share_table_elem
+          &shared_frame_to_find.elem
         );
 
         // If there is already an entry
         if (found_elem != NULL) {
-          struct frame *found_frame = hash_entry(
+          struct shared_frame *found_shared_frame = hash_entry(
             found_elem,
-            struct frame,
-            share_table_elem
+            struct shared_frame,
+            elem
           );
 
+          lock_acquire(&found_shared_frame->lock);
+
           // Use the entry
-          entry->exec_file.share_frame = found_frame;
+          entry->shared_exec_file.shared_frame = found_shared_frame;
 
           // Add ourselves as an owner
-          frame_add_owner(found_frame, t);
+          shared_frame_add_owner(found_shared_frame, t);
+
+          lock_release(&found_shared_frame->lock);
         } else {
           // Create a new shared frame for the share table
-          struct frame *shared_frame = malloc(sizeof(struct frame));
+          struct shared_frame *shared_frame =
+            malloc(sizeof(struct shared_frame));
 
           if (shared_frame == NULL) {
             PANIC("Kernel out of memory!");
           }
 
-          shared_frame->kvaddr = NULL;
+          shared_frame->frame = NULL;
 
           list_init(&shared_frame->owners);
-          frame_add_owner(shared_frame, t);
+          lock_init(&shared_frame->lock);
+
+          shared_frame_add_owner(shared_frame, t);
 
           shared_frame->offset = ofs;
           shared_frame->file = file;
 
-          entry->exec_file.share_frame = shared_frame;
+          entry->shared_exec_file.shared_frame = shared_frame;
 
           // Add it to the share table
-          hash_insert(&share_table, &shared_frame->share_table_elem);
+          printf("Inserting: %p\n", shared_frame);
+          hash_insert(&share_table, &shared_frame->elem);
         }
 
         // Install the page into our PD if it's already in the frame table
-        if (entry->exec_file.share_frame->kvaddr != NULL) {
-          pagedir_set_page(
+        if (entry->shared_exec_file.shared_frame->frame != NULL) {
+          bool success = pagedir_set_page(
             t->pagedir,
             upage,
-            entry->exec_file.share_frame->kvaddr,
+            entry->shared_exec_file.shared_frame->frame->kvaddr,
             writable //false
           );
+          if (!success) return false;
+          printf(">>>>>> %d Loaded in %p\n", thread_current()->tid, pagedir_get_page(thread_current()->pagedir, upage));
         }
 
         lock_release(&share_table_lock);
+      } else {
+        entry->writable_exec_file.page_read_bytes = page_read_bytes;
+        entry->writable_exec_file.page_zero_bytes = page_zero_bytes;
+        entry->writable_exec_file.file = file;
+        entry->writable_exec_file.offset = ofs;
       }
 
       hash_insert(&t->spt, &entry->elem);

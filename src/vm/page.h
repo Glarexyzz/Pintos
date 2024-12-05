@@ -6,11 +6,20 @@
 #include "filesys/file.h"
 #include "vm/frame.h"
 
-/// spt_entry data for an uninitialised executable.
+/// spt_entry data for a read-only uninitialised executable.
 struct uninitialised_executable {
-  int page_read_bytes;       /* Number of bytes to read. */
-  int page_zero_bytes;       /* Number of bytes to set to zero. */
-  struct frame *share_frame; /* The shared frame in the share table. */
+  int page_read_bytes;               /* Number of bytes to read. */
+  int page_zero_bytes;               /* Number of bytes to set to zero. */
+  struct shared_frame *shared_frame; /* The shared frame in the share table. */
+};
+
+/// spt_entry data for a writable uninitialised executable.
+struct writable_executable {
+  int page_read_bytes;               /* Number of bytes to read. */
+  int page_zero_bytes;               /* Number of bytes to set to zero. */
+  struct file *file;                 /* The file to which the frame belongs. */
+  int offset;                        /* The offset of the frame within the
+                                      * file. */
 };
 
 /// Describes where the data referred to by the SPT is located.
@@ -25,7 +34,8 @@ struct spt_entry {
                              * union. */
   bool writable;            /* Whether the page is writable. */
   union {                   /* The spt_entry_type-specific data. */
-    struct uninitialised_executable exec_file;
+    struct uninitialised_executable shared_exec_file;
+    struct writable_executable writable_exec_file;
   };
 
   struct hash_elem elem;    /* For insertion into the supplemental page

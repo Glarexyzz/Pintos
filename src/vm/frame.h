@@ -5,31 +5,28 @@
 #include <list.h>
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "vm/share.h"
 
 /// Item to insert into the frame/share table
 struct frame {
-  void *kvaddr;                      /* Kernel virtual address */
-  struct list owners;                /* List of processes which own the frame */
+  void *kvaddr;                      /* Kernel virtual address. */
 
-  // Used for shared read-only executables
-  int offset;                        /* The offset of the frame within the
-                                      * file */
-  struct file *file;                 /* The file to which the frame belongs */
+  struct shared_frame *shared_frame; /* Pointer to the shared frame data, if
+                                      * applicable. */
+  struct thread *owner;              /* Pointer to the single owner, if
+                                      * applicable. */
 
-  struct list_elem queue_elem;       /* For insertion into eviction queue */
-  struct hash_elem frame_table_elem; /* For insertion into frame table */
-  struct hash_elem share_table_elem; /* For insertion into share table */
+  struct list_elem queue_elem;       /* For insertion into eviction queue. */
+  struct hash_elem table_elem; /* For insertion into frame table. */
 };
 
+/// The frame table
 struct hash frame_table;
+/// The lock for the frame table
 struct lock frame_table_lock;
 
-struct hash share_table;
-struct lock share_table_lock;
-
 void frame_table_init(void);
-void share_table_init(void);
-void frame_add_owner(struct frame *frame, struct thread *t);
+struct frame *create_frame(enum palloc_flags flags);
 void *user_get_page(enum palloc_flags flags);
 void user_free_page(void *page);
 
