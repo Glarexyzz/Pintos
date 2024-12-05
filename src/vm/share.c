@@ -254,7 +254,9 @@ void shared_frame_delete_owner(
  * @return The open file.
  */
 struct file *open_shared_file(char *filename) {
+  lock_acquire(&file_system_lock);
   struct file *file = filesys_open(filename);
+  lock_release(&file_system_lock);
   if (file == NULL) {
     return NULL;
   }
@@ -278,7 +280,9 @@ struct file *open_shared_file(char *filename) {
       struct shared_file,
       elem
     );
+    lock_acquire(&file_system_lock);
     file_close(file);
+    lock_release(&file_system_lock);
   } else {
     // Otherwise, create a new shared file
     shared_file = malloc(sizeof(shared_file));
@@ -350,7 +354,9 @@ void close_shared_file(struct file *file) {
 
   if (shared_file->num_opens == 0) {
     hash_delete(&shared_file_table, found_elem);
+    lock_acquire(&file_system_lock);
     file_close(file);
+    lock_release(&file_system_lock);
     free(shared_file);
   }
 

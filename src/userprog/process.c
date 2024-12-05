@@ -795,9 +795,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char executable_name[MAX_FILENAME_LENGTH + 1];
   copy_executable_name(file_name, executable_name);
 
-  lock_acquire(&file_system_lock);
   file = open_shared_file(executable_name);
-  lock_release(&file_system_lock);
 
   // Store file pointer in thread.
   t->executable_file = file;
