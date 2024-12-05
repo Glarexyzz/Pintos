@@ -253,11 +253,14 @@ static bool load_shared_executable(struct spt_entry *spt_entry) {
 
   shared_frame->frame = new_frame;
   new_frame->shared_frame = shared_frame;
+  lock_release(&shared_frame->lock);
 
   // Insert the page into the page table.
-//  lock_acquire(&frame_table_lock);
+  lock_acquire(&frame_table_lock);
   hash_insert(&frame_table, &new_frame->table_elem);
-//  lock_release(&frame_table_lock);
+  lock_release(&frame_table_lock);
+
+  lock_acquire(&shared_frame->lock);
 
   if (!pagedir_set_page(
     thread_current()->pagedir,
@@ -294,7 +297,6 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   } else {
     struct shared_frame *shared_frame = spt_entry->shared_exec_file.shared_frame;
 
-    lock_acquire(&frame_table_lock);
     lock_acquire(&shared_frame->lock);
     if (shared_frame->frame == NULL) {
       success = load_shared_executable(spt_entry);
@@ -302,7 +304,6 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
       success = use_shared_executable(spt_entry);
     }
     lock_release(&shared_frame->lock);
-    lock_release(&frame_table_lock);
   }
 
   return success;
