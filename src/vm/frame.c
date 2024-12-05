@@ -95,39 +95,6 @@ struct frame *create_frame(enum palloc_flags flags) {
   return new_frame;
 }
 
-static void print_frame(struct hash_elem *elem, void *aux UNUSED) {
-  struct frame *frame = hash_entry(elem, struct frame, table_elem);
-  printf("kvaddr %p, shared_frame %p, owner %p\n", frame->kvaddr, frame->shared_frame, frame->owner);
-}
-
-static void print_frame_table(void) {
-  printf("--- Single frames [\n");
-  hash_apply(&frame_table, print_frame);
-  printf("] --- \n");
-}
-
-struct mock_owner {
-  struct thread *process; /* The thread/process which owns a page */
-  struct list_elem elem;  /* For insertion into the frame's owner list */
-};
-
-static void print_shared_frame(struct hash_elem *elem, void *aux UNUSED) {
-  struct shared_frame *shared_frame = hash_entry(elem, struct shared_frame, elem);
-  printf("shared frame %p, has frame %p, inode %p, offset %d, owners: {", shared_frame, shared_frame->frame != NULL ? shared_frame->frame->kvaddr : NULL,
-         file_get_inode(shared_frame->file), shared_frame->offset);
-  for (struct list_elem *e = list_begin(&shared_frame->owners); e != list_end(&shared_frame->owners); e = list_next(e)) {
-    struct mock_owner *owner = list_entry(e, struct mock_owner, elem);
-    printf("Proc %d (%s); ", owner->process->tid, owner->process->name);
-  }
-  printf("}\n");
-}
-
-static void print_shared_frame_table(void) {
-  printf("--- Shared frames [\n");
-  hash_apply(&share_table, print_shared_frame);
-  printf("] --- \n");
-}
-
 /**
  * Obtain a page from the user pool.
  * @param flags The flags for the palloc_get_page call.
@@ -144,9 +111,6 @@ void *user_get_page(enum palloc_flags flags) {
   hash_insert(&frame_table, &new_frame->table_elem);
   lock_release(&frame_table_lock);
 
-//  printf("After inserting %p, frame table:\n", new_frame);
-//  print_frame_table();
-
   return new_frame->kvaddr;
 }
 
@@ -157,16 +121,11 @@ void *user_get_page(enum palloc_flags flags) {
  * @remark Also updates the frame table.
  */
 void user_free_page(void *page) {
-//  printf(">>>>>>>>> %d Freeing %p\n", thread_current()->tid, page);
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
 
 #ifdef VM
-//  printf("Attempting to free page %p, current frame table:\n", page);
-//  print_frame_table();
-//  printf("Current shared frame table:\n");
-//  print_shared_frame_table();
 
   // Find and update the frame in the frame table
   struct frame frame_to_find;
@@ -185,7 +144,6 @@ void user_free_page(void *page) {
   );
 
   if (found_frame->shared_frame == NULL) {
-//    printf(">>>>> One owner only\n");
     // Frame only has a single owner, so we can delete the frame.
     ASSERT(found_frame->owner != NULL);
     hash_delete(&frame_table, found_frame_elem);

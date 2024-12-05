@@ -64,7 +64,6 @@ static unsigned shared_file_hash(
     struct shared_file,
     elem
   );
-//  printf("inode %p hashes to %d\n", file_get_inode(shared_file->file), file_hash(shared_file->file));
   return file_hash(shared_file->file);
 }
 
@@ -90,8 +89,8 @@ static bool shared_file_smaller(
     struct shared_file,
     elem
   );
-
-  return file_get_inode(a_shared_file->file) < file_get_inode(b_shared_file->file);
+  return file_get_inode(a_shared_file->file) <
+    file_get_inode(b_shared_file->file);
 }
 
 /**
@@ -256,7 +255,6 @@ void shared_frame_delete_owner(
  */
 struct file *open_shared_file(char *filename) {
   struct file *file = filesys_open(filename);
-//  printf("The inode of the file is %p\n", file_get_inode(file));
   if (file == NULL) {
     return NULL;
   }
@@ -280,9 +278,8 @@ struct file *open_shared_file(char *filename) {
       struct shared_file,
       elem
     );
-//    file_close(file);
+    file_close(file);
   } else {
-//    printf("Creating new shared file\n");
     // Otherwise, create a new shared file
     shared_file = malloc(sizeof(shared_file));
     if (shared_file == NULL) {
@@ -352,7 +349,6 @@ void close_shared_file(struct file *file) {
   shared_file->num_opens--;
 
   if (shared_file->num_opens == 0) {
-    printf("Closing shared file\n");
     hash_delete(&shared_file_table, found_elem);
     file_close(file);
     free(shared_file);

@@ -195,14 +195,12 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
 }
 
 static bool load_writable_executable(struct spt_entry *spt_entry) {
-//  printf("load writable\n");
   int page_read_bytes = spt_entry->writable_exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->writable_exec_file.page_zero_bytes;
   struct file *file = spt_entry->writable_exec_file.file;
   int offset = spt_entry->writable_exec_file.offset;
 
   uint8_t *kpage = user_get_page(0);
-//  printf("with page kvaddr %p\n", kpage);
 
   // Read the executable file into memory.
   int read_bytes = 0;
@@ -231,7 +229,6 @@ static bool load_writable_executable(struct spt_entry *spt_entry) {
 }
 
 static bool load_shared_executable(struct spt_entry *spt_entry) {
-//  printf("load shared\n");
   int page_read_bytes = spt_entry->shared_exec_file.page_read_bytes;
   int page_zero_bytes = spt_entry->shared_exec_file.page_zero_bytes;
   struct shared_frame *shared_frame = spt_entry->shared_exec_file.shared_frame;
@@ -275,7 +272,6 @@ static bool load_shared_executable(struct spt_entry *spt_entry) {
 }
 
 static bool use_shared_executable(struct spt_entry *spt_entry) {
-//  printf("use shared\n");
   return pagedir_set_page(
     thread_current()->pagedir,
     spt_entry->uvaddr,
@@ -308,8 +304,6 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
     lock_release(&shared_frame->lock);
     lock_release(&frame_table_lock);
   }
-
-//  printf(">>>>>> %d Loaded in %p\n", thread_current()->tid, pagedir_get_page(thread_current()->pagedir, spt_entry->uvaddr));
 
   return success;
 }
@@ -397,12 +391,6 @@ page_fault (struct intr_frame *f)
  fail:
 
   if (thread_current()->is_user) {
-    debug_backtrace();
-    printf ("Page fault at %p: %s error %s page in %s context.\n",
-            fault_addr,
-            not_present ? "not present" : "rights violation",
-            write ? "writing" : "reading",
-            user ? "user" : "kernel");
     exit_user_process(ERROR_STATUS_CODE);
   } else {
     printf ("Page fault at %p: %s error %s page in %s context.\n",

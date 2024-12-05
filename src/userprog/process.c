@@ -822,7 +822,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
       || ehdr.e_phentsize != sizeof (struct Elf32_Phdr)
       || ehdr.e_phnum > 1024) 
     {
-      printf("%p\n", file_get_inode(file));
       printf ("load: %s: error loading executable\n", executable_name);
       goto done; 
     }
@@ -1084,7 +1083,6 @@ static bool load_segment (
           entry->shared_exec_file.shared_frame = shared_frame;
 
           // Add shared frame to the share table
-//          printf("Inserting: %p\n", shared_frame);
           hash_insert(&share_table, &shared_frame->elem);
         }
 
@@ -1097,7 +1095,6 @@ static bool load_segment (
             writable //false
           );
           if (!success) return false;
-//          printf(">>>>>> %d Loaded in %p\n", thread_current()->tid, pagedir_get_page(thread_current()->pagedir, upage));
         }
 
         lock_release(&share_table_lock);
