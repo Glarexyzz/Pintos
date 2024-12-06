@@ -223,10 +223,10 @@ void pin_page(void *uvaddr) {
 
 static void assert_pinned(struct frame *found_frame) {
   for (
-      struct list_elem *elem = list_begin(&eviction_list);
-      elem != list_end(&eviction_list);
-      elem = list_next(elem)
-      ) {
+    struct list_elem *elem = list_begin(&eviction_list);
+    elem != list_end(&eviction_list);
+    elem = list_next(elem)
+  ) {
     struct frame *cur_frame = list_entry(elem, struct frame, queue_elem);
 
     if (found_frame->kvaddr == cur_frame->kvaddr) {
