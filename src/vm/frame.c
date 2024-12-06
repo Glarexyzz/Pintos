@@ -338,92 +338,110 @@ void unpin_page(void *uvaddr) {
   lock_release(&eviction_lock);
 }
 
-void evict_frame(void) {
-  lock_acquire(&frame_table_lock);
-  lock_acquire(&eviction_lock);
-
-  if (list_empty(&eviction_list)) {
-    printf("No more frames to evict!\n");
-    lock_release(&eviction_lock);
-    lock_release(&frame_table_lock);
-    exit_user_process(ERROR_STATUS_CODE);
+/**
+ * Grabs the spt locks of two threads (that are possibly the same thread)
+ * in an established partial order, avoiding deadlocks.
+ * @param a The first thread.
+ * @param b The second thread.
+ */
+static void acquire_two_spt_locks(struct thread *a, struct thread *b) {
+  if (a->tid == b->tid) {
+    // They are the same process, so we only need to acquire the lock once.
+    lock_acquire(&a->spt_lock);
     return;
   }
 
+  if (a->tid < b->tid) {
+    lock_acquire(&a->spt_lock);
+    lock_acquire(&b->spt_lock);
+  } else {
+    lock_acquire(&b->spt_lock);
+    lock_acquire(&a->spt_lock);
+  }
+}
 
-  for (;;) {
-    if (eviction_cursor == list_end(&eviction_list)) {
-      eviction_cursor = list_begin(&eviction_list);
-    }
-    struct frame *cur_frame = list_entry(
-      eviction_cursor,
-      struct frame,
-      queue_elem
-    );
-    struct owner *owner = cur_frame->owner;
-    // TODO: Check if there are multiple owners!
+/**
+ * Releases the spt locks of two threads, making sure to only release once if
+ * they are the same.
+ * @param a The first thread.
+ * @param b The second thread.
+ */
+static void release_two_spt_locks(struct thread *a, struct thread *b) {
+  if (a->tid == b->tid) {
+    lock_release(&a->spt_lock);
+  } else {
+    lock_release(&b->spt_lock);
+    lock_release(&a->spt_lock);
+  }
+}
 
-    // Check the frame accessed bit to determine if it has a second chance.
-    if (!pagedir_is_accessed(owner->process->pagedir, owner->uvaddr)) {
-      // Evict!
-      eviction_cursor = list_remove(eviction_cursor);
-      hash_delete(&frame_table, &cur_frame->table_elem);
-      // Since this is the only exit point of the loop, we can release the
-      // locks here, minimising the time other threads spend blocked.
-
-      // Check if there's an SPT entry already, and handle accordingly.
-      struct spt_entry entry_to_find;
-      entry_to_find.uvaddr = owner->uvaddr;
-
-      lock_acquire(&owner->process->spt_lock);
-      struct hash_elem *found_elem = hash_find(
-        &owner->process->spt,
-        &entry_to_find.elem
-      );
-
-      if (found_elem != NULL) {
-        // Entry to find, handle accordingly.
-        struct spt_entry *found_entry = hash_entry(
-          found_elem,
-          struct spt_entry,
-          elem
-        );
-
-        switch (found_entry->type) {
-          case UNINITIALISED_EXECUTABLE:
-            pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
-            break;
-          case MMAP:
-            mmap_flush_entry(found_entry, owner->process);
-            // TODO: POSSIBLE RACE CONDITION HERE; WHERE THREAD
-            break;
-          default:
-            PANIC("Unrecognised spt_entry type!\n");
-        }
-      } else {
-        // No entry, so we can evict normally.
-        pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
-        size_t swap_slot = swap_out(cur_frame->kvaddr);
-
-        // Create and add an SPT entry to signify the page being evicted.
-        struct spt_entry *new_entry = malloc(sizeof(struct spt_entry));
-        new_entry->uvaddr = owner->uvaddr;
-        new_entry->type = SWAPPED;
-        new_entry->swap_slot = swap_slot;
-
-        hash_insert(&owner->process->spt, &new_entry->elem);
+/**
+ * Acquires the lock of multiple threads, making sure not to acquire thread a's
+ * spt_lock twice in case it appears in bs
+ * @param a The first thread.
+ * @param bs A list of owners.
+ * @pre bs is sorted in order of ascending tid.
+ */
+static void acquire_multiple_spt_locks(struct thread *a, struct list *bs) {
+  bool a_is_locked = false;
+  for (
+    struct list_elem *cur_elem = list_begin(bs);
+    cur_elem != list_end(bs);
+    cur_elem = list_next(cur_elem)
+  ) {
+    struct thread *cur_b = list_entry(cur_elem, struct owner, elem)->process;
+    if (a->tid < cur_b->tid) {
+      // a is smaller, so grab a first
+      if (!a_is_locked) {
+        lock_acquire(&a->spt_lock);
+        a_is_locked = true;
       }
-      lock_release(&owner->process->spt_lock);
+      lock_acquire(&cur_b->spt_lock);
 
+    } else if (a->tid == cur_b->tid) {
+      if (!a_is_locked) {
+        lock_acquire(&a->spt_lock);
+        a_is_locked = true;
+      }
 
-      free(cur_frame);
-      break;
+    } else {
+      // b is smaller, so grab b first
+      lock_acquire(&cur_b->spt_lock);
     }
-
-    pagedir_set_accessed(owner->process->pagedir, owner->uvaddr, false);
-    eviction_cursor = list_next(eviction_cursor);
   }
 
-  lock_release(&eviction_lock);
-  lock_release(&frame_table_lock);
+  // If a isn't acquired, it had the largest tid and therefore needs to be
+  // locked now.
+  if (!a_is_locked) {
+    lock_acquire(&a->spt_lock);
+  }
+}
+
+static void release_multiple_spt_locks(struct thread *a, struct list *bs) {
+  bool a_is_released = false;
+  for (
+    struct list_elem *cur_elem = list_begin(bs);
+    cur_elem != list_end(bs);
+    cur_elem = list_next(cur_elem)
+  ) {
+    struct thread *cur_b = list_entry(cur_elem, struct owner, elem)->process;
+    if (a->tid == cur_b->tid) {
+      if (!a_is_released) {
+        lock_release(&a->spt_lock);
+        a_is_released = true;
+      }
+    } else {
+      lock_release(&cur_b->spt_lock);
+    }
+  }
+
+  // If a isn't acquired, it had the largest tid and therefore needs to be
+  // locked now.
+  if (!a_is_released) {
+    lock_release(&a->spt_lock);
+  }
+}
+
+void evict_frame(void) {
+
 }
