@@ -592,6 +592,9 @@ void exit_user_process(int status) {
 
   lock_release(&user_processes_lock);
 
+  // Destroy the supplemental page table.
+  // TODO:
+
   // Destroy the memory-mapped file table.
   mmap_destroy();
 
