@@ -363,6 +363,19 @@ static bool load_swapped_page(struct spt_entry *spt_entry) {
   return true;
 }
 
+static bool parse_spt_entry(struct spt_entry *entry) {
+  struct lock *spt_lock = &thread_current()->spt_lock;
+
+  switch (entry->type) {
+    case UNINITIALISED_EXECUTABLE:
+      return load_uninitialised_executable(entry);
+    case MMAP:
+      return mmap_load_entry(entry);
+    case SWAPPED:
+      return load_swapped_page(entry);
+  }
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to task 2 may
    also require modifying this code.
@@ -438,25 +451,9 @@ page_fault (struct intr_frame *f)
   // Exit if writing to a read-only page
   if (write && !found_entry->writable) goto fail;
 
-  switch (found_entry->type) {
-    case UNINITIALISED_EXECUTABLE:
-      if (!load_uninitialised_executable(found_entry)) {
-        lock_release(&cur->spt_lock);
-        goto fail;
-      }
-      break;
-    case MMAP:
-      if (!mmap_load_entry(found_entry)) {
-        lock_release(&cur->spt_lock);
-        goto fail;
-      }
-      break;
-    case SWAPPED:
-      if (!load_swapped_page(found_entry)) {
-        lock_release(&cur->spt_lock);
-        goto fail;
-      }
-      break;
+  if (!parse_spt_entry(found_entry)) {
+    lock_release(&cur->spt_lock);
+    goto fail;
   }
 
   lock_release(&cur->spt_lock);
