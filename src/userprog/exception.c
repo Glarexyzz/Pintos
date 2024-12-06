@@ -331,6 +331,12 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   return success;
 }
 
+/**
+ * Given an spt_entry, loads its corresponding frame from the swap partition
+ * of the disk.
+ * @param spt_entry The spt_entry corresponding to the frame to be swapped in.
+ * @return `true` iff the frame was successfully loaded in.
+ */
 static bool load_swapped_page(struct spt_entry *spt_entry) {
   struct thread *cur = thread_current();
   lock_release(&cur->spt_lock);
@@ -363,7 +369,13 @@ static bool load_swapped_page(struct spt_entry *spt_entry) {
   return true;
 }
 
-static bool parse_spt_entry(struct spt_entry *entry) {
+/**
+ * Checks given spt_entry, and delegates to page fault handler according to its
+ * type.
+ * @param entry The spt_entry to be handled.
+ * @return `true` iff loading the page was successful.
+ */
+static bool process_spt_entry(struct spt_entry *entry) {
   struct lock *spt_lock = &thread_current()->spt_lock;
 
   switch (entry->type) {
@@ -451,7 +463,7 @@ page_fault (struct intr_frame *f)
   // Exit if writing to a read-only page
   if (write && !found_entry->writable) goto fail;
 
-  if (!parse_spt_entry(found_entry)) {
+  if (!process_spt_entry(found_entry)) {
     lock_release(&cur->spt_lock);
     goto fail;
   }
