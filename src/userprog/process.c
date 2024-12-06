@@ -1007,6 +1007,7 @@ static bool load_segment (
       
       if (kpage != NULL) {
         // Free the page to remove old data.
+        pagedir_clear_page(t->pagedir, upage);
         user_free_page(kpage);
       }
 
