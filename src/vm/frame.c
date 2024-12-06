@@ -442,6 +442,64 @@ static void release_multiple_spt_locks(struct thread *a, struct list *bs) {
   }
 }
 
-void evict_frame(void) {
+bool frame_accessed(struct frame *frame) {
+  bool accessed = false;
+  if (frame->shared_frame == NULL) {
+    // Single owner case. Check if it is accessed and reset the bit.
+    accessed = pagedir_is_accessed(
+      frame->owner->process->pagedir,
+      frame->owner->uvaddr
+    );
+    pagedir_set_accessed(
+      frame->owner->process->pagedir,
+      frame->owner->uvaddr,
+      false
+    );
+  } else {
+    // Multiple owners, so we only need one to have accessed it.
+    struct list *owners = &frame->shared_frame->owners;
+    for (
+      struct list_elem *cur_elem = list_begin(owners);
+      cur_elem != list_end(owners);
+      cur_elem = list_next(cur_elem)
+    ) {
+      struct owner *cur_owner = list_entry(cur_elem,
+      struct owner, elem);
+      accessed |= pagedir_is_accessed(
+        cur_owner->process->pagedir,
+        cur_owner->uvaddr
+      );
+      pagedir_set_accessed(
+        cur_owner->process->pagedir,
+        cur_owner->uvaddr,
+        false
+      );
+    }
+  }
+  return accessed;
+}
 
+void evict_frame(void) {
+  lock_acquire(&frame_table_lock);
+  lock_acquire(&eviction_lock);
+
+  if (list_empty(&eviction_list)) {
+    printf("No frames to evict!\n");
+    exit_user_process(-1);
+  }
+
+  // Find the frame to evict.
+  while (true) {
+    if (eviction_cursor == list_end(&eviction_list)) {
+      eviction_cursor = list_begin(&eviction_list);
+    }
+
+    struct frame *frame_to_evict = list_entry(
+      eviction_cursor,
+      struct frame,
+      queue_elem
+    );
+
+    // We need to check if there is a list of owners
+  }
 }
