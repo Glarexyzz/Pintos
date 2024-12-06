@@ -3,17 +3,27 @@
 
 #include <debug.h>
 #include <hash.h>
+#include "filesys/file.h"
 #include "filesys/off_t.h"
+#include "vm/frame.h"
 #include "vm/mmap.h"
 
-/// spt_entry data for an uninitialised executable.
+/// spt_entry data for a read-only uninitialised executable.
 struct uninitialised_executable {
-  int page_read_bytes;      /* Number of bytes to read. */
-  int page_zero_bytes;      /* Number of bytes to set to zero. */
-  int offset;               /* Offset in the file to read from. */
+  int page_read_bytes;               /* Number of bytes to read. */
+  int page_zero_bytes;               /* Number of bytes to set to zero. */
+  struct shared_frame *shared_frame; /* The shared frame in the share table. */
 };
 
-// Page mapped to a file in memory.
+/// spt_entry data for a writable uninitialised executable.
+struct writable_executable {
+  int page_read_bytes; /* Number of bytes to read. */
+  int page_zero_bytes; /* Number of bytes to set to zero. */
+  struct file *file;   /* The file to which the frame belongs. */
+  int offset;          /* The offset of the frame within the file. */
+};
+
+/// Page mapped to a file in memory.
 struct memory_mapped_file {
   struct mmap_entry *mmap_entry; /* Entry in the table of file mappings. */
   struct list_elem elem;         /* For insertion in the list of pages
@@ -39,7 +49,8 @@ struct spt_entry {
   bool writable;            /* Whether the page is writable. */
   union {                   /* The spt_entry_type-specific data. */
     size_t swap_slot;
-    struct uninitialised_executable exec_file;
+    struct uninitialised_executable shared_exec_file;
+    struct writable_executable writable_exec_file;
     struct memory_mapped_file mmap;
   };
 

@@ -1,25 +1,14 @@
 #include <debug.h>
 #include <stdio.h>
 #include "devices/swap.h"
+#include "filesys/file.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
-#include "vm/page.h"
-
-/// The circular queue used for the second-chance eviction algorithm
-struct list eviction_queue;
-/// The lock for the eviction queue
-struct lock eviction_queue_lock;
-/// The semaphore containing the number of frames in the eviction queue
-struct semaphore eviction_sema;
-
-/// The frame table
-struct hash frame_table;
-/// The lock for the frame table
-struct lock frame_table_lock;
+#include "vm/share.h"
 
 /// The list that stores all frames that are eligible for eviction.
 struct list eviction_list;
@@ -38,7 +27,7 @@ static bool frame_kvaddr_smaller(
 
 /**
  * A hash_hash_func for frame struct.
- * @param element The pointer to the hash_elem in the frame struct.
+ * @param element The pointer to the table_elem in the frame struct.
  * @param aux Unused.
  * @return The hash of the frame.
  */
@@ -82,13 +71,12 @@ void frame_table_init() {
 }
 
 /**
- * Obtain a page from the user pool.
+ * Get a page from the user pool and create an associated frame.
  * @param flags The flags for the palloc_get_page call.
- * @return The kernel virtual address for the page.
- * @pre The caller is a user process.
- * @remark Also updates the frame table.
+ * @return The new frame.
+ * @remark Does not update the frame table.
  */
-void *user_get_page(enum palloc_flags flags) {
+struct frame *create_frame(enum palloc_flags flags) {
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
@@ -98,31 +86,37 @@ void *user_get_page(enum palloc_flags flags) {
     PANIC("No free pages!");
   }
 
-#ifdef VM
   // Initialise the page
   struct frame *new_frame = malloc(sizeof (struct frame));
   if (new_frame == NULL) {
     PANIC("Kernel out of memory!");
   }
   new_frame->kvaddr = kvaddr;
-  list_init(&new_frame->owners);
 
-  // Add the current process to the new frame's list of owners
-  struct owner *new_frame_owner = malloc(sizeof (struct owner));
-  if (new_frame_owner == NULL) {
-    PANIC("Kernel out of memory!");
-  }
-  new_frame_owner->process = cur_thread;
-  list_push_front(&new_frame->owners, &new_frame_owner->elem);
+  // Add the current process as the frame's owner
+  new_frame->owner = cur_thread;
+  new_frame->shared_frame = NULL;
+
+  return new_frame;
+}
+
+/**
+ * Obtain a page from the user pool.
+ * @param flags The flags for the palloc_get_page call.
+ * @return The kernel virtual address for the page.
+ * @pre The caller is a user process.
+ * @remark Updates the frame table.
+ */
+void *user_get_page(enum palloc_flags flags) {
+  struct frame *new_frame = create_frame(flags);
+//  printf("Attempting to insert %p to frame table\n", new_frame);
 
   // Insert the page into the page table
   lock_acquire(&frame_table_lock);
   hash_insert(&frame_table, &new_frame->table_elem);
   lock_release(&frame_table_lock);
 
-#endif
-
-  return kvaddr;
+  return new_frame->kvaddr;
 }
 
 /**
@@ -135,7 +129,6 @@ void user_free_page(void *page) {
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
-  palloc_free_page(page);
 
 #ifdef VM
 
@@ -156,31 +149,48 @@ void user_free_page(void *page) {
     table_elem
   );
 
-  // Iterate through the frame's owners
-  bool owner_found = false;
-  for (
-    struct list_elem *cur_elem = list_begin(&found_frame->owners);
-    cur_elem != list_end(&found_frame->owners);
-    cur_elem = list_next(cur_elem)
-  ) {
+  if (found_frame->shared_frame == NULL) {
+    // Frame only has a single owner, so we can delete the frame.
+    ASSERT(found_frame->owner != NULL);
+    hash_delete(&frame_table, found_frame_elem);
+    // TODO: Free the frame struct?
+    palloc_free_page(page);
 
-    // If the current owner is the current thread
-    struct owner *cur_owner = list_entry(cur_elem, struct owner, elem);
-    if (cur_owner->process->tid == cur_thread->tid) {
+  } else {
+    struct shared_frame *shared_frame = found_frame->shared_frame;
 
-      // Remove the thread from the frame's owners
-      owner_found = true;
-      list_remove(cur_elem);
-      free(cur_owner);
-      break;
+    // Frame is shared, so we must remove ourselves as an owner.
+    lock_acquire(&share_table_lock);
+    lock_acquire(&shared_frame->lock);
+    shared_frame_delete_owner(shared_frame, cur_thread);
+
+    // If the list of owners is now empty, we can delete both the frame and the
+    // shared_frame.
+    if (list_empty(&shared_frame->owners)) {
+
+      // Delete the shared_frame
+      struct hash_elem *deleted_shared_frame_elem = hash_delete(
+        &share_table,
+        &shared_frame->elem
+      );
+      ASSERT(deleted_shared_frame_elem != NULL);
+      close_shared_file(shared_frame->file);
+
+      // Delete the frame and free the shared_frame
+      hash_delete(&frame_table, found_frame_elem);
+      palloc_free_page(page);
+      lock_release(&shared_frame->lock);
+      lock_release(&share_table_lock);
+      free(shared_frame);
+
+    } else {
+      // The shared_frame still has owners.
+      lock_release(&shared_frame->lock);
+      lock_release(&share_table_lock);
     }
   }
-  ASSERT(owner_found);
 
-  // Remove the frame from the frame table
-  hash_delete(&frame_table, found_frame_elem);
   lock_release(&frame_table_lock);
-
 #endif
 }
 

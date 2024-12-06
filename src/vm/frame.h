@@ -5,6 +5,7 @@
 #include <list.h>
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "vm/share.h"
 
 /// The item to be inserted into the frame struct's owners list
 struct owner {
@@ -15,17 +16,24 @@ struct owner {
 
 /// Item to insert into the frame table
 struct frame {
-  void *kvaddr;                /* Kernel virtual address */
-  bool ref_bit;                /* Reference bit for eviction */
-  struct list owners;          /* List of processes which own the frame */
-  struct list_elem queue_elem; /* For insertion into eviction queue */
-  struct hash_elem table_elem; /* For insertion into frame table */
+  void *kvaddr;                      /* Kernel virtual address. */
+
+  struct shared_frame *shared_frame; /* Pointer to the shared frame data, if
+                                      * applicable. */
+  struct thread *owner;              /* Pointer to the single owner, if
+                                      * applicable. */
+
+  struct list_elem queue_elem;       /* For insertion into eviction queue. */
+  struct hash_elem table_elem;       /* For insertion into frame table. */
 };
 
+/// The frame table
 struct hash frame_table;
+/// The lock for the frame table
 struct lock frame_table_lock;
 
 void frame_table_init(void);
+struct frame *create_frame(enum palloc_flags flags);
 void *user_get_page(enum palloc_flags flags);
 void user_free_page(void *page);
 
