@@ -415,12 +415,17 @@ static void remove_spt_entries(struct list *mapped_pages) {
  * memory-mapping entry.
  * @param mmap_hash_elem The (generic) hash table element.
  * @param aux (Unused.)
+ * @pre The frame table lock, SPT lock and file system lock should all not
+ * be held by the current thread.
  */
 static void free_mmap_elem(
   struct hash_elem *mmap_hash_elem,
   void *aux UNUSED
 ) {
   ASSERT(mmap_hash_elem != NULL);
+  ASSERT(!lock_held_by_current_thread(&frame_table_lock));
+  ASSERT(!lock_held_by_current_thread(&thread_current()->spt_lock));
+  ASSERT(!lock_held_by_current_thread(&file_system_lock));
   // Obtain the underlying memory-mapping entry.
   struct mmap_entry *mmap_entry = from_hash_elem(mmap_hash_elem);
   // Remove all the mapped pages, close the file, and free the entry.
@@ -434,9 +439,14 @@ static void free_mmap_elem(
 /**
  * Destroys the current hash table, implicitly unmapping all entries
  * and freeing any owned resources.
- * @remark This function may acquire the file system lock.
+ * @pre The frame table lock, SPT lock and file system lock should all not
+ * be held by the current thread.
  */
 void mmap_destroy(void) {
+  ASSERT(!lock_held_by_current_thread(&frame_table_lock));
+  ASSERT(!lock_held_by_current_thread(&thread_current()->spt_lock));
+  ASSERT(!lock_held_by_current_thread(&file_system_lock));
+
   hash_destroy(get_mmap_table(), &free_mmap_elem);
 }
 
@@ -444,9 +454,14 @@ void mmap_destroy(void) {
  * Unmaps an entry from the current process's memory-mapped file table,
  * flushing changes if needed.
  * Does nothing if the entry is not mapped.
- * @remark This function may acquire the file system lock.
+ * @pre The frame table lock, SPT lock and file system lock should all not
+ * be held by the current thread.
  */
 void mmap_remove_mapping(mapid_t mapping_id) {
+  ASSERT(!lock_held_by_current_thread(&frame_table_lock));
+  ASSERT(!lock_held_by_current_thread(&thread_current()->spt_lock));
+  ASSERT(!lock_held_by_current_thread(&file_system_lock));
+
   struct mmap_entry key;
   key.mapping_id = mapping_id;
   struct hash_elem *found_elem = hash_delete(get_mmap_table(), &key.elem);
