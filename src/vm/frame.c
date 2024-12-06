@@ -239,7 +239,7 @@ static void assert_pinned(struct frame *found_frame) {
 }
 
 /**
- * Pins a page, given a uvaddr, that prevents
+ * Pins a page, given a uvaddr, preventing it from getting evicted.
  * @param uvaddr
  */
 void unpin_page(void *uvaddr) {
@@ -250,10 +250,12 @@ void unpin_page(void *uvaddr) {
   struct frame frame_to_find;
   frame_to_find.kvaddr = kvaddr;
 
+  lock_acquire(&frame_table_lock);
   struct hash_elem *found_elem = hash_find(
     &frame_table,
     &frame_to_find.table_elem
   );
+  lock_release(&frame_table_lock);
   ASSERT(found_elem != NULL);
 
   struct frame *found_frame = hash_entry(
