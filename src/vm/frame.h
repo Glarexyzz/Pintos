@@ -20,7 +20,7 @@ struct frame {
 
   struct shared_frame *shared_frame; /* Pointer to the shared frame data, if
                                       * applicable. */
-  struct thread *owner;              /* Pointer to the single owner, if
+  struct owner *owner;              /* Pointer to the single owner, if
                                       * applicable. */
 
   struct list_elem queue_elem;       /* For insertion into eviction queue. */

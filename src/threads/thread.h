@@ -5,6 +5,7 @@
 #include <hash.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 #include "fixed-point.h"
 
@@ -125,6 +126,8 @@ struct thread
 	struct hash mmap_table;             /* Memory mapped file table. */
   /* Counter for allocating memory-mapped file ID numbers. */
 	int mmap_id_counter;
+    struct lock spt_lock;               /* Lock to ensure consistency of
+                                         * accesses to spt entries. */
 #endif
 
     /* Owned by thread.c. */

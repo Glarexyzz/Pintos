@@ -1,14 +1,14 @@
-#include "filesys/file.h"
-#include "userprog/pagedir.h"
-#include "userprog/exception.h"
-#include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include "devices/swap.h"
+#include "filesys/file.h"
+#include "userprog/exception.h"
 #include "userprog/gdt.h"
-#include "userprog/process.h"
 #include "threads/interrupt.h"
+#include "userprog/pagedir.h"
+#include "userprog/process.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
@@ -181,6 +181,7 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
     // Could not obtain a page for the stack.
     return false;
   }
+
   // Try to map the address to the stack
   uint32_t *pd = thread_current()->pagedir;
   const void *aligned_addr = pg_round_down(fault_addr);
@@ -189,6 +190,7 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
     user_free_page(stack_page);
     return false;
   }
+
   return true;
 }
 
@@ -203,7 +205,9 @@ static bool load_writable_executable(struct spt_entry *spt_entry) {
   struct file *file = spt_entry->writable_exec_file.file;
   int offset = spt_entry->writable_exec_file.offset;
 
+  lock_release(&thread_current()->spt_lock);
   uint8_t *kpage = user_get_page(0);
+  lock_acquire(&thread_current()->spt_lock);
 
   // Read the executable file into memory.
   int read_bytes = 0;
@@ -264,9 +268,13 @@ static bool load_shared_executable(struct spt_entry *spt_entry) {
   lock_release(&shared_frame->lock);
 
   // Insert the page into the page table.
+  lock_release(&thread_current()->spt_lock);
+
   lock_acquire(&frame_table_lock);
   hash_insert(&frame_table, &new_frame->table_elem);
   lock_release(&frame_table_lock);
+
+  lock_acquire(&thread_current()->spt_lock);
 
   lock_acquire(&shared_frame->lock);
 
@@ -323,6 +331,38 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   return success;
 }
 
+static bool load_swapped_page(struct spt_entry *spt_entry) {
+  struct thread *cur = thread_current();
+  lock_release(&cur->spt_lock);
+
+  void *kpage = user_get_page(0);
+  swap_in(kpage, spt_entry->swap_slot); // TODO: Does it matter if kvaddr or uvaddr?
+  if (!pagedir_set_page(
+      cur->pagedir,
+      spt_entry->uvaddr,
+      kpage,
+      spt_entry->writable
+  )) {
+    user_free_page(kpage);
+    lock_acquire(&cur->spt_lock);
+    return false;
+  }
+
+  // Remove the SPT entry. The lock will be released outside of this function.
+  lock_acquire(&cur->spt_lock);
+  struct hash_elem *found_elem = hash_delete(&cur->spt, &spt_entry->elem);
+  ASSERT(found_elem != NULL);
+
+  struct spt_entry *found_entry = hash_entry(
+    found_elem,
+    struct spt_entry,
+    elem
+  );
+  free(found_entry);
+
+  return true;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to task 2 may
    also require modifying this code.
@@ -376,9 +416,12 @@ page_fault (struct intr_frame *f)
   struct spt_entry entry_to_find;
   entry_to_find.uvaddr = pg_round_down(fault_addr);
 
+  lock_acquire(&cur->spt_lock);
   struct hash_elem *found_elem = hash_find(&cur->spt, &entry_to_find.elem);
 
   if (found_elem == NULL) { // The address is not in the SPT
+    lock_release(&cur->spt_lock);
+
     // Try to grow the stack
     if (!stack_grow(f, fault_addr)) goto fail;
     return; // The stack grew successfully - we're done handling the page fault
@@ -397,17 +440,29 @@ page_fault (struct intr_frame *f)
 
   switch (found_entry->type) {
     case UNINITIALISED_EXECUTABLE:
-      if (!load_uninitialised_executable(found_entry)) goto fail;
+      if (!load_uninitialised_executable(found_entry)) {
+        lock_release(&cur->spt_lock);
+        goto fail;
+      }
       break;
     case MMAP:
-      if (!mmap_load_entry(found_entry)) goto fail;
+      if (!mmap_load_entry(found_entry)) {
+        lock_release(&cur->spt_lock);
+        goto fail;
+      }
+      break;
+    case SWAPPED:
+      if (!load_swapped_page(found_entry)) {
+        lock_release(&cur->spt_lock);
+        goto fail;
+      }
       break;
   }
 
+  lock_release(&cur->spt_lock);
   return;
 
  fail:
-
   if (thread_current()->is_user) {
     exit_user_process(ERROR_STATUS_CODE);
   } else {

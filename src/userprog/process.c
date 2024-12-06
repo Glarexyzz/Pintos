@@ -1014,10 +1014,12 @@ static bool load_segment (
       // Remove entry from SPT if it already exists
       struct spt_entry entry_to_find;
       entry_to_find.uvaddr = upage;
+      lock_acquire(&t->spt_lock);
       struct hash_elem *found_elem = hash_find(&t->spt, &entry_to_find.elem);
       if (found_elem != NULL) {
         hash_delete(&t->spt, found_elem);
       }
+      lock_release(&t->spt_lock);
 
       // Construct the element to insert into the SPT.
       struct spt_entry *entry = malloc(sizeof(struct spt_entry));
@@ -1111,7 +1113,9 @@ static bool load_segment (
         entry->writable_exec_file.offset = ofs;
       }
 
+      lock_acquire(&t->spt_lock);
       hash_insert(&t->spt, &entry->elem);
+      lock_release(&t->spt_lock);
 
       /* Advance. */
       read_bytes -= page_read_bytes;

@@ -8,6 +8,7 @@
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 #include "vm/share.h"
 
 /// The list that stores all frames that are eligible for eviction.
@@ -82,8 +83,10 @@ struct frame *create_frame(enum palloc_flags flags) {
 
   // Get the kernel virtual address
   void *kvaddr = palloc_get_page(PAL_USER | flags);
-  if (kvaddr == NULL) {
-    PANIC("No free pages!");
+  while (kvaddr == NULL) {
+    printf("Kernel out of memory! Evicting...\n");
+    evict_frame();
+    kvaddr = palloc_get_page(PAL_USER | flags);
   }
 
   // Initialise the page
@@ -94,7 +97,16 @@ struct frame *create_frame(enum palloc_flags flags) {
   new_frame->kvaddr = kvaddr;
 
   // Add the current process as the frame's owner
-  new_frame->owner = cur_thread;
+  struct owner *owner = malloc(sizeof(struct owner));
+  if (owner == NULL) {
+    PANIC("Kernel out of memory!");
+  }
+  // TODO: Free appropriately in evict and user_free_page!
+
+  owner->process = cur_thread;
+  // TODO: Add uvaddr!
+
+  new_frame->owner = owner;
   new_frame->shared_frame = NULL;
 
   return new_frame;
@@ -129,14 +141,14 @@ void user_free_page(void *page) {
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
-
-#ifdef VM
-
   // Find and update the frame in the frame table
   struct frame frame_to_find;
   frame_to_find.kvaddr = page;
 
   lock_acquire(&frame_table_lock);
+  // Acquire own lock
+  // After acquiring, check if the frame we wanted to free still exists, as
+  // it might've gotten evicted.
   // TODO: Ensure proper synchronisation with eviction.
   struct hash_elem *found_frame_elem = hash_find(
     &frame_table,
@@ -149,13 +161,14 @@ void user_free_page(void *page) {
     table_elem
   );
 
+  bool delete_frame = false;
   if (found_frame->shared_frame == NULL) {
     // Frame only has a single owner, so we can delete the frame.
     ASSERT(found_frame->owner != NULL);
     hash_delete(&frame_table, found_frame_elem);
-    // TODO: Free the frame struct?
     palloc_free_page(page);
 
+    delete_frame = true;
   } else {
     struct shared_frame *shared_frame = found_frame->shared_frame;
 
@@ -183,6 +196,7 @@ void user_free_page(void *page) {
       lock_release(&share_table_lock);
       free(shared_frame);
 
+      delete_frame = true;
     } else {
       // The shared_frame still has owners.
       lock_release(&shared_frame->lock);
@@ -190,8 +204,11 @@ void user_free_page(void *page) {
     }
   }
 
+  if (delete_frame) {
+    free(found_frame->owner);
+    free(found_frame);
+  }
   lock_release(&frame_table_lock);
-#endif
 }
 
 void eviction_list_init(void) {
@@ -275,11 +292,8 @@ void evict_frame(void) {
       struct frame,
       queue_elem
     );
-    struct owner *owner = list_entry(
-      list_begin(&cur_frame->owners),
-      struct owner,
-      elem
-    );
+    struct owner *owner = cur_frame->owner;
+    // TODO: Check if there are multiple owners!
 
     // Check the frame accessed bit to determine if it has a second chance.
     if (!pagedir_is_accessed(owner->process->pagedir, owner->uvaddr)) {
@@ -288,14 +302,12 @@ void evict_frame(void) {
       hash_delete(&frame_table, &cur_frame->table_elem);
       // Since this is the only exit point of the loop, we can release the
       // locks here, minimising the time other threads spend blocked.
-      lock_release(&eviction_lock);
-      lock_release(&frame_table_lock);
 
-      // TODO: WRITE TO FILE IF MMAP, OTHERWISE JUST PUT SWAP SLOT IN SPT.
       // Check if there's an SPT entry already, and handle accordingly.
       struct spt_entry entry_to_find;
       entry_to_find.uvaddr = owner->uvaddr;
 
+      lock_acquire(&owner->process->spt_lock);
       struct hash_elem *found_elem = hash_find(
         &owner->process->spt,
         &entry_to_find.elem
@@ -316,7 +328,6 @@ void evict_frame(void) {
           case MMAP:
             mmap_flush_entry(found_entry, owner->process);
             // TODO: POSSIBLE RACE CONDITION HERE; WHERE THREAD
-            pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
             break;
           default:
             PANIC("Unrecognised spt_entry type!\n");
@@ -334,11 +345,11 @@ void evict_frame(void) {
 
         hash_insert(&owner->process->spt, &new_entry->elem);
       }
+      lock_release(&owner->process->spt_lock);
 
 
       free(cur_frame);
       break;
-
     }
 
     // TODO: SET ACCESSED TO FALSE AND NEXT

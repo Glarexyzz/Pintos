@@ -3,6 +3,7 @@
 #include "page.h"
 #include "threads/thread.h"
 #include "threads/malloc.h"
+#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "userprog/exception.h"
 #include "userprog/pagedir.h"
@@ -135,11 +136,13 @@ static bool create_spt_entries(
   if (base_addr == NULL || pg_ofs(base_addr) != 0) {
     return false;
   }
+
   // The address of the start of the last page in the mapped file.
   void *end_addr = pg_round_down(base_addr + len);
   if (end_addr >= PHYS_BASE - STACK_MAX) {
     return false;
   }
+
   // Now attempt to allocate SPT entries for insertion.
   bool success = true;
   struct list *spt_entries = &dest_mmap_entry->pages;
@@ -150,34 +153,44 @@ static bool create_spt_entries(
       success = false;
       break;
     }
+
     entry->uvaddr = base_addr + cur_off;
     ASSERT(pg_ofs(entry->uvaddr) == 0);
+
     // Check if the entry is present in the SPT or page directory.
     // This is needed to check for overlap with existing pages, such as the
     // program's executable pages.
     uint32_t *pagedir = thread_current()->pagedir;
     struct hash *spt = &thread_current()->spt;
+    lock_acquire(&thread_current()->spt_lock);
+
     bool page_present = pagedir_get_page(pagedir, entry->uvaddr) != NULL
       || hash_find(spt, &entry->elem) != NULL;
     if (page_present) {
       free(entry);
       success = false;
+      lock_release(&thread_current()->spt_lock);
       break;
     }
+
     // Add the fields to the SPT entry.
     entry->type = MMAP;
     entry->mmap.mmap_entry = dest_mmap_entry;
     entry->writable = true;
+
     // Add the expected number of page and zero bytes.
     off_t remaining = len - cur_off;
     size_t page_file_bytes = remaining % PGSIZE;
     entry->mmap.page_file_bytes = page_file_bytes;
     entry->mmap.page_zero_bytes = PGSIZE - page_file_bytes;
     list_push_back(spt_entries, &entry->mmap.elem);
+
     // Insert the SPT entry into the table.
     struct hash_elem *prev = hash_insert(spt, &entry->elem);
     ASSERT(prev == NULL);
+    lock_release(&thread_current()->spt_lock);
   }
+
   if (!success) {
     remove_spt_entries(&dest_mmap_entry->pages);
     return false;
@@ -332,26 +345,50 @@ bool mmap_load_entry(struct spt_entry *entry) {
  * @remark mapped_pages itself is not freed.
  */
 static void remove_spt_entries(struct list *mapped_pages) {
+
   struct list_elem *cur = list_begin(mapped_pages);
+  uint32_t *pagedir = thread_current()->pagedir;
   struct hash *spt = &thread_current()->spt;
+
+  // TODO: Store kvaddresses in a list to later free.
+
+  // We acquire the lock early so that we can ensure synchronisation with
+  // eviction.
+  lock_acquire(&thread_current()->spt_lock);
+
   while (cur != list_end(mapped_pages)) {
     struct list_elem *next = list_next(cur);
     // Delete from the list.
     list_remove(cur);
+
     // The SPT entry is chained to the list of mapped pages using mmap.elem;
     // obtain the underlying SPT entry
     struct spt_entry *spt_entry = list_entry(cur, struct spt_entry, mmap.elem);
+
     // Flush changes in any currently-allocated frames if they have been
     // written to.
+    // Get kernel address right now, as the page entry gets removed when the
+    // memory mapped file gets flushed.
+    void *kvaddr = pagedir_get_page(pagedir, spt_entry->uvaddr);
     mmap_flush_entry(spt_entry, thread_current());
+
+    // If the frame exists, we must remove it from the frame table and free it.
+    if (kvaddr != NULL) {
+      // get frame table lock
+      // TODO: Remove from frame table. Ensure synchronisation!
+    }
+
     // Remove the mapped page from the SPT; this must have been malloced
     // beforehand.
     struct hash_elem *found_elem = hash_delete(spt, &spt_entry->elem);
     ASSERT(found_elem == &spt_entry->elem);
+
     free(spt_entry);
     cur = next;
   }
   ASSERT(list_empty(mapped_pages));
+
+  lock_release(&thread_current()->spt_lock);
 }
 
 /**
