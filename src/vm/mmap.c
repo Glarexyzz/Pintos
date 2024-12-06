@@ -265,6 +265,7 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
 void mmap_flush_entry(struct spt_entry *entry, struct thread *t) {
   ASSERT(entry != NULL);
   ASSERT(entry->type == MMAP);
+  ASSERT(lock_held_by_current_thread(&thread_current()->spt_lock));
 
   // Get the frame from the page, if one exists.
   uint32_t *pagedir = t->pagedir;
@@ -302,22 +303,29 @@ void mmap_flush_entry(struct spt_entry *entry, struct thread *t) {
  * @return `true` if an allocation occurred (i.e., no frame was previously
  * allocated for the page, and allocation succeeded.)
  * @pre The entry is non-null, and the type is MMAP.
+ * @pre The SPT lock needs to be held by the current thread.
  * @remark This function needs to acquire the file system lock.
  * @remark The caller is responsible for freeing the allocated frame.
  */
 bool mmap_load_entry(struct spt_entry *entry) {
   ASSERT(entry != NULL);
   ASSERT(entry->type == MMAP);
+  ASSERT(lock_held_by_current_thread(&thread_current()->spt_lock));
+
   uint32_t *pagedir = thread_current()->pagedir;
   // If a frame is already allocated to the page, do nothing.
   if (pagedir_get_page(pagedir, entry->uvaddr) != NULL) {
     return false;
   }
+
   // Attempt to add to the page directory as rewritable, so that we can
   // manipulate the frame.
+  lock_release(&thread_current()->spt_lock);
   void *frame = user_get_page(0);
+  lock_acquire(&thread_current()->spt_lock);
+
   if (!pagedir_set_page(pagedir, entry->uvaddr, frame, true)) {
-    free(frame);
+    palloc_free_page(frame);
     return false;
   }
   struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
@@ -328,15 +336,18 @@ bool mmap_load_entry(struct spt_entry *entry) {
   off_t offset = entry->uvaddr - base_address;
   off_t bytes_to_read = entry->mmap.page_file_bytes;
   off_t bytes_to_zero = entry->mmap.page_zero_bytes;
+
   // Write file bytes to the frame.
   lock_acquire(&file_system_lock);
   off_t read_bytes = file_read_at(source, frame, bytes_to_read, offset);
   lock_release(&file_system_lock);
+
   if (read_bytes != bytes_to_read) {
     pagedir_clear_page(pagedir, entry->uvaddr);
     free(frame);
     return false;
   }
+
   // Success; zero the rest of the frame.
   memset(frame + bytes_to_read, 0, bytes_to_zero);
   // Set the dirty bit to false on initiation.
