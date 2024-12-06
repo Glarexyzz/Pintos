@@ -180,10 +180,8 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
   // Attempt to allocate a stack page for the current process.
   // If allocation fails, return false to kill the process.
   void *stack_page = user_get_page(0, aligned_addr);
-  if (stack_page == NULL) {
-    // Could not obtain a page for the stack.
-    return false;
-  }
+  ASSERT(stack_page != NULL);
+
   ASSERT(pagedir_get_page(pd, aligned_addr) == NULL);
   if (!pagedir_set_page(pd, (void *)aligned_addr, stack_page, true)) {
     user_free_page(stack_page);
@@ -449,6 +447,8 @@ page_fault (struct intr_frame *f)
 
     // Try to grow the stack
     if (!stack_grow(f, fault_addr)) goto fail;
+    ASSERT(pagedir_get_page(cur->pagedir, pg_round_down(fault_addr)));
+    unpin_page(pg_round_down(fault_addr));
     return; // The stack grew successfully - we're done handling the page fault
   }
 
