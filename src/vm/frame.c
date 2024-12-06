@@ -155,7 +155,11 @@ void user_free_page(void *page) {
     if (list_empty(&shared_frame->owners)) {
 
       // Delete the shared_frame
-      ASSERT(hash_delete(&share_table, &shared_frame->elem) != NULL);
+      struct hash_elem *deleted_shared_frame_elem = hash_delete(
+        &share_table,
+        &shared_frame->elem
+      );
+      ASSERT(deleted_shared_frame_elem != NULL);
       close_shared_file(shared_frame->file);
 
       // Delete the frame and free the shared_frame
