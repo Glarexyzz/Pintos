@@ -5,6 +5,7 @@
 #include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/exception.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
 #include "vm/frame.h"
@@ -217,8 +218,70 @@ void eviction_list_init(void) {
   eviction_cursor = list_begin(&eviction_list);
 }
 
+/**
+ * Pins a page, preventing it from getting evicted.
+ * @param uvaddr The address of the page to be pinned.
+ */
 void pin_page(void *uvaddr) {
-  // TODO
+  lock_acquire(&frame_table_lock);
+  lock_acquire(&eviction_lock);
+  lock_acquire(&thread_current()->spt_lock);
+  void *kvaddr = pagedir_get_page(thread_current()->pagedir, uvaddr);
+  if (kvaddr == NULL) {
+    lock_release(&frame_table_lock);
+    lock_release(&eviction_lock);
+
+    // The page has been evicted, so we must bring it back in.
+    struct spt_entry entry_to_find;
+    entry_to_find.uvaddr = uvaddr;
+
+    struct hash_elem *found_elem = hash_find(
+      &thread_current()->spt,
+      &entry_to_find.elem
+    );
+
+    // If the element is not found, that means we have tried to pin a
+    // non-existent page.
+    ASSERT(found_elem != NULL);
+    struct spt_entry *found_entry = hash_entry(
+      found_elem,
+      struct spt_entry,
+      elem
+    );
+
+    // This will load the page into memory, without pinning it.
+    bool success = process_spt_entry(found_entry);
+
+    // For debugging.
+    ASSERT(success);
+    kvaddr = pagedir_get_page(thread_current()->pagedir, uvaddr);
+    ASSERT(kvaddr != NULL);
+  } else {
+    // The page is in memory, so we find its frame and remove it from the
+    // eviction list.
+    ASSERT(kvaddr != NULL);
+
+    struct frame frame_to_find;
+    frame_to_find.kvaddr = kvaddr;
+
+    struct hash_elem *found_elem = hash_find(
+      &frame_table,
+      &frame_to_find.table_elem
+    );
+    ASSERT(found_elem != NULL);
+
+    struct frame *found_frame = hash_entry(
+      found_elem,
+      struct frame,
+      table_elem
+    );
+    list_remove(&found_frame->queue_elem);
+
+    lock_release(&frame_table_lock);
+    lock_release(&eviction_lock);
+  }
+
+  lock_release(&thread_current()->spt_lock);
 }
 
 static void assert_pinned(struct frame *found_frame) {
@@ -239,8 +302,8 @@ static void assert_pinned(struct frame *found_frame) {
 }
 
 /**
- * Pins a page, given a uvaddr, preventing it from getting evicted.
- * @param uvaddr The user address for the page to be pinned.
+ * Pins a page, given a uvaddr, allowing it to get evicted again.
+ * @param uvaddr The user address for the page to be unpinned.
  */
 void unpin_page(void *uvaddr) {
   ASSERT(pg_ofs(uvaddr) == 0);
@@ -354,7 +417,6 @@ void evict_frame(void) {
       break;
     }
 
-    // TODO: SET ACCESSED TO FALSE AND NEXT
     pagedir_set_accessed(owner->process->pagedir, owner->uvaddr, false);
     eviction_cursor = list_next(eviction_cursor);
   }
