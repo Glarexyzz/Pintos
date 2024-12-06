@@ -121,6 +121,7 @@ bool mmap_init(void) {
  * @param dest_mmap_entry The (non-null) entry, not yet inserted into the
  * mapping table.
  * @param len The length of the file.
+ * @pre The SPT lock should not already be held by the current process.
  * @return `false` iff the memory-mapping region overlaps with existing pages
  * in the SPT or the stack.
  */
@@ -128,6 +129,11 @@ static bool create_spt_entries(
   struct mmap_entry *dest_mmap_entry,
   off_t len
 ) {
+  uint32_t *pagedir = thread_current()->pagedir;
+  struct hash *spt = &thread_current()->spt;
+  struct lock *spt_lock = &thread_current()->spt_lock;
+  ASSERT(!lock_held_by_current_thread(spt_lock));
+
   ASSERT(dest_mmap_entry != NULL);
   ASSERT(len > 0);
   // First, check that the file's memory-mapped region does not overlap with
@@ -144,10 +150,17 @@ static bool create_spt_entries(
   }
 
   // Now attempt to allocate SPT entries for insertion.
+
+  // Check if any entry is present in the SPT or page directory.
+  // This is needed to check for overlap with existing pages, such as the
+  // program's executable pages.
+  lock_acquire(spt_lock);
+
   bool success = true;
   struct list *spt_entries = &dest_mmap_entry->pages;
   list_init(spt_entries);
   for (off_t cur_off = 0; cur_off < len; cur_off += PGSIZE) {
+
     struct spt_entry *entry = malloc(sizeof(struct spt_entry));
     if (entry == NULL) {
       success = false;
@@ -157,19 +170,11 @@ static bool create_spt_entries(
     entry->uvaddr = base_addr + cur_off;
     ASSERT(pg_ofs(entry->uvaddr) == 0);
 
-    // Check if the entry is present in the SPT or page directory.
-    // This is needed to check for overlap with existing pages, such as the
-    // program's executable pages.
-    uint32_t *pagedir = thread_current()->pagedir;
-    struct hash *spt = &thread_current()->spt;
-    lock_acquire(&thread_current()->spt_lock);
-
     bool page_present = pagedir_get_page(pagedir, entry->uvaddr) != NULL
       || hash_find(spt, &entry->elem) != NULL;
     if (page_present) {
       free(entry);
       success = false;
-      lock_release(&thread_current()->spt_lock);
       break;
     }
 
@@ -188,8 +193,9 @@ static bool create_spt_entries(
     // Insert the SPT entry into the table.
     struct hash_elem *prev = hash_insert(spt, &entry->elem);
     ASSERT(prev == NULL);
-    lock_release(&thread_current()->spt_lock);
   }
+
+  lock_release(spt_lock);
 
   if (!success) {
     remove_spt_entries(&dest_mmap_entry->pages);
