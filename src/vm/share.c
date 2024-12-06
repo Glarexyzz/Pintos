@@ -165,7 +165,7 @@ void share_table_init() {
     NULL
   );
   if (!success) {
-    PANIC("Could not initialise share table!");
+    PANIC("Could not initialise shared file table!");
   }
   lock_init(&shared_file_table_lock);
 }
