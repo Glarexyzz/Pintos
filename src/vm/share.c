@@ -198,7 +198,7 @@ void shared_frame_add_owner(
   struct shared_frame *shared_frame,
   struct thread *t
 ) {
-  struct owner *owner = malloc(sizeof(owner));
+  struct owner *owner = malloc(sizeof(struct owner));
   if (owner == NULL) {
     PANIC("Kernel out of memory!");
   }
