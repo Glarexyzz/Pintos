@@ -359,21 +359,27 @@ bool mmap_load_entry(struct spt_entry *entry) {
  * Frees a list of mapped pages corresponding to memory-mapped files, flushing
  * changes if required.
  * @param mapped_pages A list of mapped pages.
+ * @pre The current process has not acquired the frame table, SPT and file
+ * system lock.
  * @remark mapped_pages itself is not freed.
  */
 static void remove_spt_entries(struct list *mapped_pages) {
-
   struct list_elem *cur = list_begin(mapped_pages);
   uint32_t *pagedir = thread_current()->pagedir;
   struct hash *spt = &thread_current()->spt;
+  struct lock *spt_lock = &thread_current()->spt_lock;
 
-  // TODO: Store kvaddresses in a list to later free.
-
-  // We acquire the lock early so that we can ensure synchronisation with
-  // eviction.
-  lock_acquire(&thread_current()->spt_lock);
+  ASSERT(!lock_held_by_current_thread(&frame_table_lock));
+  ASSERT(!lock_held_by_current_thread(spt_lock));
+  ASSERT(!lock_held_by_current_thread(&file_system_lock));
 
   while (cur != list_end(mapped_pages)) {
+    // Acquire the frame table lock, then the SPT lock of the current thread.
+    // We need to acquire the first before the second to avoid race conditions,
+    // to maintain a partial ordering.
+    lock_acquire(&frame_table_lock);
+    lock_acquire(spt_lock);
+
     struct list_elem *next = list_next(cur);
     // Delete from the list.
     list_remove(cur);
@@ -387,12 +393,24 @@ static void remove_spt_entries(struct list *mapped_pages) {
     // Get kernel address right now, as the page entry gets removed when the
     // memory mapped file gets flushed.
     void *kvaddr = pagedir_get_page(pagedir, spt_entry->uvaddr);
+
+    // Update changes to the disk, if there are any.
     mmap_flush_entry(spt_entry, thread_current());
 
     // If the frame exists, we must remove it from the frame table and free it.
     if (kvaddr != NULL) {
-      // get frame table lock
-      // TODO: Remove from frame table. Ensure synchronisation!
+      // Attempt to index into the frame table again, removing if still present.
+      struct frame key;
+      key.kvaddr = kvaddr;
+      struct hash_elem *found_elem = hash_delete(&frame_table, &key.table_elem);
+      struct frame *frame = hash_entry(found_elem, struct frame, table_elem);
+
+      if (found_elem != NULL) {
+        // Remove it from the eviction queue.
+        palloc_free_page(frame->kvaddr);
+        free(frame->owner);
+        free(frame);
+      }
     }
 
     // Remove the mapped page from the SPT; this must have been malloced
@@ -400,12 +418,12 @@ static void remove_spt_entries(struct list *mapped_pages) {
     struct hash_elem *found_elem = hash_delete(spt, &spt_entry->elem);
     ASSERT(found_elem == &spt_entry->elem);
 
+    lock_release(&frame_table_lock);
+    lock_release(spt_lock);
+
     free(spt_entry);
     cur = next;
   }
-  ASSERT(list_empty(mapped_pages));
-
-  lock_release(&thread_current()->spt_lock);
 }
 
 /**
