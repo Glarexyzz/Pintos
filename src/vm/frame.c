@@ -240,7 +240,7 @@ static void assert_pinned(struct frame *found_frame) {
 
 /**
  * Pins a page, given a uvaddr, preventing it from getting evicted.
- * @param uvaddr
+ * @param uvaddr The user address for the page to be pinned.
  */
 void unpin_page(void *uvaddr) {
   ASSERT(pg_ofs(uvaddr) == 0);
