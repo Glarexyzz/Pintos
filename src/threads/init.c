@@ -40,6 +40,7 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
+#include "vm/share.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -123,6 +124,7 @@ main (void)
 
 #ifdef VM
   frame_table_init();
+  share_table_init();
 #endif
 
   /* Start thread scheduler and enable interrupts. */

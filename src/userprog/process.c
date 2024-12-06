@@ -23,8 +23,9 @@
 #include "threads/vaddr.h"
 #ifdef VM
 #include "vm/frame.h"
-#include "vm/page.h"
 #include "vm/mmap.h"
+#include "vm/page.h"
+#include "vm/share.h"
 #endif
 
 
@@ -600,7 +601,7 @@ void exit_user_process(int status) {
 
   // Close the executable file pointer, allowing writes again.
   ASSERT(cur_thread->executable_file != NULL);
-  file_close(cur_thread->executable_file);
+  close_shared_file(cur_thread->executable_file);
 
   // Print the exit status
   printf("%s: exit(%d)\n", thread_current()->name, status);
@@ -758,16 +759,21 @@ struct Elf32_Phdr
 
 static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
-static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
-                          uint32_t read_bytes, uint32_t zero_bytes,
-                          bool writable);
+static bool load_segment (
+  struct file *file,
+  off_t ofs,
+  uint8_t *upage,
+  uint32_t read_bytes,
+  uint32_t zero_bytes,
+  bool writable
+);
 
 /* Loads an ELF executable from FILE_NAME into the current thread.
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
 bool
-load (const char *file_name, void (**eip) (void), void **esp) 
+load (const char *file_name, void (**eip) (void), void **esp)
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -798,9 +804,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   char executable_name[MAX_FILENAME_LENGTH + 1];
   copy_executable_name(file_name, executable_name);
 
-  lock_acquire(&file_system_lock);
-  file = filesys_open (executable_name);
-  lock_release(&file_system_lock);
+  file = open_shared_file(executable_name);
 
   // Store file pointer in thread.
   t->executable_file = file;
@@ -817,7 +821,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   lock_release(&file_system_lock);
 
   /* Read and verify executable header. */
-  if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
+  if (file_read_at (file, &ehdr, sizeof ehdr, 0) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
       || ehdr.e_machine != 3
@@ -977,10 +981,14 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-static bool
-load_segment (struct file *file, off_t ofs, uint8_t *upage,
-              uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
-{
+static bool load_segment (
+  struct file *file,
+  off_t ofs,
+  uint8_t *upage,
+  uint32_t read_bytes,
+  uint32_t zero_bytes,
+  bool writable
+) {
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
@@ -999,10 +1007,19 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       
       if (kpage != NULL) {
         // Free the page to remove old data.
+        pagedir_clear_page(t->pagedir, upage);
         user_free_page(kpage);
       }
 
-      // Construct the element to insert into the spt.
+      // Remove entry from SPT if it already exists
+      struct spt_entry entry_to_find;
+      entry_to_find.uvaddr = upage;
+      struct hash_elem *found_elem = hash_find(&t->spt, &entry_to_find.elem);
+      if (found_elem != NULL) {
+        hash_delete(&t->spt, found_elem);
+      }
+
+      // Construct the element to insert into the SPT.
       struct spt_entry *entry = malloc(sizeof(struct spt_entry));
       if (entry == NULL) {
         // Kernel out of memory!
@@ -1011,9 +1028,88 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       entry->uvaddr = upage;
       entry->type = UNINITIALISED_EXECUTABLE;
       entry->writable = writable;
-      entry->exec_file.page_read_bytes = page_read_bytes;
-      entry->exec_file.page_zero_bytes = page_zero_bytes;
-      entry->exec_file.offset = ofs;
+
+      // Share read-only pages
+      if (!writable) {
+        entry->shared_exec_file.page_read_bytes = page_read_bytes;
+        entry->shared_exec_file.page_zero_bytes = page_zero_bytes;
+
+        // Check if an entry exists in the share table
+        struct shared_frame shared_frame_to_find;
+        shared_frame_to_find.offset = ofs;
+        shared_frame_to_find.file = file;
+
+        lock_acquire(&share_table_lock);
+        struct hash_elem *found_elem = hash_find(
+          &share_table,
+          &shared_frame_to_find.elem
+        );
+
+        // If there is already an entry
+        if (found_elem != NULL) {
+          struct shared_frame *found_shared_frame = hash_entry(
+            found_elem,
+            struct shared_frame,
+            elem
+          );
+
+          // Use the entry and add ourselves as an owner
+          lock_acquire(&found_shared_frame->lock);
+          entry->shared_exec_file.shared_frame = found_shared_frame;
+          shared_frame_add_owner(found_shared_frame, t);
+          lock_release(&found_shared_frame->lock);
+
+        } else {
+          // Create a new shared frame for the share table
+          struct shared_frame *shared_frame =
+            malloc(sizeof(struct shared_frame));
+
+          if (shared_frame == NULL) {
+            PANIC("Kernel out of memory!");
+          }
+
+          // The shared frame doesn't yet have a frame in the frame table
+          shared_frame->frame = NULL;
+
+          // Initialise the shared frame owners list and lock
+          list_init(&shared_frame->owners);
+          lock_init(&shared_frame->lock);
+
+          // Add caller as an owner of the shared frame
+          shared_frame_add_owner(shared_frame, t);
+
+          // Set the file and offset of the shared frame
+          shared_frame->offset = ofs;
+          shared_frame->file = file;
+          increase_open_count(file);
+
+          // Add the shared frame to the SPT entry
+          entry->shared_exec_file.shared_frame = shared_frame;
+
+          // Add shared frame to the share table
+          hash_insert(&share_table, &shared_frame->elem);
+        }
+
+        // Install the page into our PD if it's already in the frame table
+        if (entry->shared_exec_file.shared_frame->frame != NULL) {
+          bool success = pagedir_set_page(
+            t->pagedir,
+            upage,
+            entry->shared_exec_file.shared_frame->frame->kvaddr,
+            writable //false
+          );
+          if (!success) return false;
+        }
+
+        lock_release(&share_table_lock);
+      } else {
+
+        // The file is writable - no sharing
+        entry->writable_exec_file.page_read_bytes = page_read_bytes;
+        entry->writable_exec_file.page_zero_bytes = page_zero_bytes;
+        entry->writable_exec_file.file = file;
+        entry->writable_exec_file.offset = ofs;
+      }
 
       hash_insert(&t->spt, &entry->elem);
 

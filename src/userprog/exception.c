@@ -193,16 +193,15 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
 }
 
 /**
- * Handles loading of uninitialised executable file, allocating pages
- * and reading the executable file into them.
- * @param fault_addr The address
- * @return
+ * Handles loading of a writable executable file into memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
  */
-static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
-  struct thread *cur = thread_current();
-
-  int page_read_bytes = spt_entry->exec_file.page_read_bytes;
-  int page_zero_bytes = spt_entry->exec_file.page_zero_bytes;
+static bool load_writable_executable(struct spt_entry *spt_entry) {
+  int page_read_bytes = spt_entry->writable_exec_file.page_read_bytes;
+  int page_zero_bytes = spt_entry->writable_exec_file.page_zero_bytes;
+  struct file *file = spt_entry->writable_exec_file.file;
+  int offset = spt_entry->writable_exec_file.offset;
 
   uint8_t *kpage = user_get_page(0);
 
@@ -210,17 +209,18 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
   int read_bytes = 0;
   if (page_read_bytes != 0) {
     lock_acquire(&file_system_lock);
-    file_seek(cur->executable_file, spt_entry->exec_file.offset);
-    read_bytes = file_read(cur->executable_file, kpage, page_read_bytes);
+    file_seek(file, offset);
+    read_bytes = file_read(file, kpage, page_read_bytes);
     lock_release(&file_system_lock);
   }
-  if (read_bytes != page_read_bytes)
+  if (read_bytes != page_read_bytes) {
+    user_free_page(kpage);
     return false;
+  }
   memset(kpage + page_read_bytes, 0, page_zero_bytes);
 
-  // Add the page to the page directory, making it read-only.
   if (!pagedir_set_page(
-    cur->pagedir,
+    thread_current()->pagedir,
     spt_entry->uvaddr,
     kpage,
     spt_entry->writable
@@ -228,11 +228,99 @@ static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
     user_free_page(kpage);
     return false;
   }
-
-  hash_delete(&cur->spt, &spt_entry->elem);
-  free(spt_entry);
-
   return true;
+}
+
+/**
+ * Handles loading of a shared executable file into memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
+ */
+static bool load_shared_executable(struct spt_entry *spt_entry) {
+  int page_read_bytes = spt_entry->shared_exec_file.page_read_bytes;
+  int page_zero_bytes = spt_entry->shared_exec_file.page_zero_bytes;
+  struct shared_frame *shared_frame = spt_entry->shared_exec_file.shared_frame;
+
+  // We must allocate a frame to put in shared_frame.
+  struct frame *new_frame = create_frame(0);
+  uint8_t *kpage = new_frame->kvaddr;
+
+  // Read the executable file into memory.
+  int read_bytes = 0;
+  if (page_read_bytes != 0) {
+    lock_acquire(&file_system_lock);
+    file_seek(shared_frame->file, shared_frame->offset);
+    read_bytes = file_read(shared_frame->file, kpage, page_read_bytes);
+    lock_release(&file_system_lock);
+  }
+  if (read_bytes != page_read_bytes) {
+    user_free_page(kpage);
+    return false;
+  }
+  memset(kpage + page_read_bytes, 0, page_zero_bytes);
+
+  shared_frame->frame = new_frame;
+  new_frame->shared_frame = shared_frame;
+  lock_release(&shared_frame->lock);
+
+  // Insert the page into the page table.
+  lock_acquire(&frame_table_lock);
+  hash_insert(&frame_table, &new_frame->table_elem);
+  lock_release(&frame_table_lock);
+
+  lock_acquire(&shared_frame->lock);
+
+  if (!pagedir_set_page(
+    thread_current()->pagedir,
+    spt_entry->uvaddr,
+    kpage,
+    spt_entry->writable
+  )) {
+    user_free_page(kpage);
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Handles using a shared executable file that has already been loaded into
+ * memory.
+ * @param spt_entry The supplemental page table entry.
+ * @return `true` iff loading was successful.
+ */
+static bool use_shared_executable(struct spt_entry *spt_entry) {
+  return pagedir_set_page(
+    thread_current()->pagedir,
+    spt_entry->uvaddr,
+    spt_entry->shared_exec_file.shared_frame->frame->kvaddr,
+    spt_entry->writable
+  );
+}
+
+/**
+ * Handles loading of uninitialised executable file, allocating pages
+ * and reading the executable file into them.
+ * @param fault_addr The address.
+ * @return `true` iff loading was successful.
+ */
+static bool load_uninitialised_executable(struct spt_entry *spt_entry) {
+  bool success;
+  // Get the status of the uninitialised executable, and handle accordingly.
+  if (spt_entry->writable) {
+    success = load_writable_executable(spt_entry);
+  } else {
+    struct shared_frame *shared_frame = spt_entry->shared_exec_file.shared_frame;
+
+    lock_acquire(&shared_frame->lock);
+    if (shared_frame->frame == NULL) {
+      success = load_shared_executable(spt_entry);
+    } else {
+      success = use_shared_executable(spt_entry);
+    }
+    lock_release(&shared_frame->lock);
+  }
+
+  return success;
 }
 
 /* Page fault handler.  This is a skeleton that must be filled in
