@@ -7,7 +7,6 @@
 #include "userprog/exception.h"
 #include "userprog/pagedir.h"
 #include "userprog/process.h"
-#include "vm/frame.h"
 
 /// Functions for operating on internal elements in the mapping table.
 static inline struct mmap_entry *from_hash_elem(
@@ -235,31 +234,43 @@ mapid_t mmap_add_mapping(int fd, void *base_addr) {
 }
 
 /**
- * Flushes a given frame in a memory-mapped page to the disk, if it is present
- * and has been written to (the dirty bit is set to `true`).
+ * Flushes and frees a given frame in a memory-mapped page to the disk, if it
+ * is present and has been written to (the dirty bit is set to `true`).
+ * This will also invalidate the thread's page directory entry at the virtual
+ * address, if it exists.
  * @param entry The entry in the current process's SPT.
+ * @param t The thread that owns the entry, for getting the correct pagedir.
  * @pre The entry is non-null, and the type is MMAP.
  * @remark The caller is responsible for freeing the underlying page.
  */
-void mmap_flush_entry(struct spt_entry *entry) {
+void mmap_flush_entry(struct spt_entry *entry, struct thread *t) {
   ASSERT(entry != NULL);
   ASSERT(entry->type == MMAP);
+
   // Get the frame from the page, if one exists.
-  void *frame = pagedir_get_page(thread_current()->pagedir, entry->uvaddr);
+  uint32_t *pagedir = t->pagedir;
+  void *frame = pagedir_get_page(pagedir, entry->uvaddr);
+
+  // Invalidate the entry at that page.
+  pagedir_clear_page(pagedir, entry->uvaddr);
+
   // If the frame is not present, we must have already flushed its changes out
   // or the page was never in memory in the first place.
   if (frame == NULL) {
     return;
   }
+
   // If the frame hasn't been written to, we don't need to write to the disk.
-  if (!pagedir_is_dirty(thread_current()->pagedir, entry->uvaddr)) {
+  if (!pagedir_is_dirty(pagedir, entry->uvaddr)) {
     return;
   }
   struct mmap_entry *in_mmap_entry = entry->mmap.mmap_entry;
+
   // Verify that the reference to the parent entry is valid.
   ASSERT(in_mmap_entry != NULL);
   off_t offset = entry->uvaddr - in_mmap_entry->maddr;
   off_t write_amount = entry->mmap.page_file_bytes;
+
   // Write to the file.
   lock_acquire(&file_system_lock);
   file_write_at(in_mmap_entry->file, frame, write_amount, offset);
@@ -332,7 +343,7 @@ static void remove_spt_entries(struct list *mapped_pages) {
     struct spt_entry *spt_entry = list_entry(cur, struct spt_entry, mmap.elem);
     // Flush changes in any currently-allocated frames if they have been
     // written to.
-    mmap_flush_entry(spt_entry);
+    mmap_flush_entry(spt_entry, thread_current());
     // Remove the mapped page from the SPT; this must have been malloced
     // beforehand.
     struct hash_elem *found_elem = hash_delete(spt, &spt_entry->elem);

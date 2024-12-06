@@ -123,6 +123,7 @@ main (void)
 
 #ifdef VM
   frame_table_init();
+  eviction_list_init();
 #endif
 
   /* Start thread scheduler and enable interrupts. */

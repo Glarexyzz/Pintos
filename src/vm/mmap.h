@@ -5,6 +5,7 @@
 #include <hash.h>
 #include <user/syscall.h>
 #include "filesys/file.h"
+#include "vm/frame.h"
 
 /// A pointer to a supplemental page table entry.
 /// Necessary to avoid circular dependencies with page.h
@@ -19,7 +20,7 @@ struct mmap_entry {
 };
 
 /// Function for updating changes to a singular memory-mapped page to the disk.
-void mmap_flush_entry(spt_entry_ptr entry);
+void mmap_flush_entry(spt_entry_ptr entry, struct thread *t);
 bool mmap_load_entry(spt_entry_ptr entry);
 
 /// Functions for initialising, obtaining and destroying the mapping table.

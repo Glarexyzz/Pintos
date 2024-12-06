@@ -1,18 +1,32 @@
-#include "vm/frame.h"
+#include <debug.h>
+#include <stdio.h>
+#include "devices/swap.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "userprog/pagedir.h"
+#include "userprog/process.h"
+#include "vm/frame.h"
+#include "vm/page.h"
 
-/// The item to be inserted into the frame struct's owners list
-struct owner {
-  struct thread *process; /* The thread/process which owns a page */
-  struct list_elem elem;  /* For insertion into the frame's owner list */
-};
+/// The circular queue used for the second-chance eviction algorithm
+struct list eviction_queue;
+/// The lock for the eviction queue
+struct lock eviction_queue_lock;
+/// The semaphore containing the number of frames in the eviction queue
+struct semaphore eviction_sema;
 
 /// The frame table
 struct hash frame_table;
 /// The lock for the frame table
 struct lock frame_table_lock;
+
+/// The list that stores all frames that are eligible for eviction.
+struct list eviction_list;
+/// The lock for the eviction_list
+struct lock eviction_lock;
+/// Points to the current frame that is being considered for eviction.
+struct list_elem *eviction_cursor;
 
 static unsigned frame_hash(const struct hash_elem *element, void *aux UNUSED);
 static bool frame_kvaddr_smaller(
@@ -130,6 +144,7 @@ void user_free_page(void *page) {
   frame_to_find.kvaddr = page;
 
   lock_acquire(&frame_table_lock);
+  // TODO: Ensure proper synchronisation with eviction.
   struct hash_elem *found_frame_elem = hash_find(
     &frame_table,
     &frame_to_find.table_elem
@@ -162,8 +177,165 @@ void user_free_page(void *page) {
   }
   ASSERT(owner_found);
 
+  // Remove the frame from the frame table
   hash_delete(&frame_table, found_frame_elem);
   lock_release(&frame_table_lock);
 
 #endif
+}
+
+void eviction_list_init(void) {
+  list_init(&eviction_list);
+  lock_init(&eviction_lock);
+  eviction_cursor = list_begin(&eviction_list);
+}
+
+void pin_page(void *uvaddr) {
+  // TODO
+}
+
+static void assert_pinned(struct frame *found_frame) {
+  for (
+      struct list_elem *elem = list_begin(&eviction_list);
+      elem != list_end(&eviction_list);
+      elem = list_next(elem)
+      ) {
+    struct frame *cur_frame = list_entry(elem, struct frame, queue_elem);
+
+    if (found_frame->kvaddr == cur_frame->kvaddr) {
+      PANIC(
+          "Page %p, is already in the eviction list!\n",
+          found_frame->kvaddr
+      );
+    }
+  }
+}
+
+/**
+ * Pins a page, given a uvaddr, that prevents
+ * @param uvaddr
+ */
+void unpin_page(void *uvaddr) {
+  ASSERT(pg_ofs(uvaddr) == 0);
+  void *kvaddr = pagedir_get_page(thread_current()->pagedir, uvaddr);
+
+  // Find the correct frame to pin.
+  struct frame frame_to_find;
+  frame_to_find.kvaddr = kvaddr;
+
+  struct hash_elem *found_elem = hash_find(
+    &frame_table,
+    &frame_to_find.table_elem
+  );
+  ASSERT(found_elem != NULL);
+
+  struct frame *found_frame = hash_entry(
+    found_elem,
+    struct frame,
+    table_elem
+  );
+
+  // TODO: REMOVE THIS AS IT IS FOR DEBUGGING
+  assert_pinned(found_frame);
+
+  lock_acquire(&eviction_lock);
+  list_push_back(&eviction_list, &found_frame->queue_elem);
+  lock_release(&eviction_lock);
+}
+
+void evict_frame(void) {
+  lock_acquire(&frame_table_lock);
+  lock_acquire(&eviction_lock);
+
+  if (list_empty(&eviction_list)) {
+    printf("No more frames to evict!\n");
+    lock_release(&eviction_lock);
+    lock_release(&frame_table_lock);
+    exit_user_process(ERROR_STATUS_CODE);
+    return;
+  }
+
+
+  for (;;) {
+    if (eviction_cursor == list_end(&eviction_list)) {
+      eviction_cursor = list_begin(&eviction_list);
+    }
+    struct frame *cur_frame = list_entry(
+      eviction_cursor,
+      struct frame,
+      queue_elem
+    );
+    struct owner *owner = list_entry(
+      list_begin(&cur_frame->owners),
+      struct owner,
+      elem
+    );
+
+    // Check the frame accessed bit to determine if it has a second chance.
+    if (!pagedir_is_accessed(owner->process->pagedir, owner->uvaddr)) {
+      // Evict!
+      eviction_cursor = list_remove(eviction_cursor);
+      hash_delete(&frame_table, &cur_frame->table_elem);
+      // Since this is the only exit point of the loop, we can release the
+      // locks here, minimising the time other threads spend blocked.
+      lock_release(&eviction_lock);
+      lock_release(&frame_table_lock);
+
+      // TODO: WRITE TO FILE IF MMAP, OTHERWISE JUST PUT SWAP SLOT IN SPT.
+      // Check if there's an SPT entry already, and handle accordingly.
+      struct spt_entry entry_to_find;
+      entry_to_find.uvaddr = owner->uvaddr;
+
+      struct hash_elem *found_elem = hash_find(
+        &owner->process->spt,
+        &entry_to_find.elem
+      );
+
+      if (found_elem != NULL) {
+        // Entry to find, handle accordingly.
+        struct spt_entry *found_entry = hash_entry(
+          found_elem,
+          struct spt_entry,
+          elem
+        );
+
+        switch (found_entry->type) {
+          case UNINITIALISED_EXECUTABLE:
+            pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
+            break;
+          case MMAP:
+            mmap_flush_entry(found_entry, owner->process);
+            // TODO: POSSIBLE RACE CONDITION HERE; WHERE THREAD
+            pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
+            break;
+          default:
+            PANIC("Unrecognised spt_entry type!\n");
+        }
+      } else {
+        // No entry, so we can evict normally.
+        pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
+        size_t swap_slot = swap_out(cur_frame->kvaddr);
+
+        // Create and add an SPT entry to signify the page being evicted.
+        struct spt_entry *new_entry = malloc(sizeof(struct spt_entry));
+        new_entry->uvaddr = owner->uvaddr;
+        new_entry->type = SWAPPED;
+        new_entry->swap_slot = swap_slot;
+
+        hash_insert(&owner->process->spt, &new_entry->elem);
+      }
+
+
+      free(cur_frame);
+      break;
+
+    }
+
+    // TODO: SET ACCESSED TO FALSE AND NEXT
+    pagedir_set_accessed(owner->process->pagedir, owner->uvaddr, false);
+    eviction_cursor = list_next(eviction_cursor);
+  }
+
+  lock_release(&eviction_lock);
+  lock_release(&frame_table_lock);
 }
