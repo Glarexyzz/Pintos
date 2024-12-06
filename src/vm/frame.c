@@ -85,7 +85,6 @@ struct frame *create_frame(enum palloc_flags flags, const void *uvaddr) {
   // Get the kernel virtual address
   void *kvaddr = palloc_get_page(PAL_USER | flags);
   while (kvaddr == NULL) {
-    printf("Kernel out of memory! Evicting...\n");
     evict_frame();
     kvaddr = palloc_get_page(PAL_USER | flags);
   }
@@ -102,7 +101,6 @@ struct frame *create_frame(enum palloc_flags flags, const void *uvaddr) {
   if (owner == NULL) {
     PANIC("Kernel out of memory!");
   }
-  // TODO: Free appropriately in evict and user_free_page!
 
   owner->process = cur_thread;
   owner->uvaddr = uvaddr;
@@ -287,7 +285,7 @@ void pin_page(void *uvaddr) {
   lock_release(&thread_current()->spt_lock);
 }
 
-static void assert_pinned(struct frame *found_frame) {
+static bool assert_pinned(struct frame *found_frame) {
   for (
     struct list_elem *elem = list_begin(&eviction_list);
     elem != list_end(&eviction_list);
@@ -296,12 +294,11 @@ static void assert_pinned(struct frame *found_frame) {
     struct frame *cur_frame = list_entry(elem, struct frame, queue_elem);
 
     if (found_frame->kvaddr == cur_frame->kvaddr) {
-      PANIC(
-          "Page %p, is already in the eviction list!\n",
-          found_frame->kvaddr
-      );
+      return false;
     }
   }
+
+  return true;
 }
 
 /**
@@ -330,10 +327,12 @@ void unpin_page(void *uvaddr) {
     table_elem
   );
 
-  // TODO: REMOVE THIS AS IT IS FOR DEBUGGING
-  assert_pinned(found_frame);
-
   lock_acquire(&eviction_lock);
+  if (!assert_pinned(found_frame)) {
+    lock_release(&eviction_lock);
+    return;
+  }
+
   list_push_back(&eviction_list, &found_frame->queue_elem);
   lock_release(&eviction_lock);
 }
@@ -442,6 +441,22 @@ static void release_multiple_spt_locks(struct thread *a, struct list *bs) {
   }
 }
 
+static void acquire_frame_locks(struct thread *a, struct frame* frame) {
+  if (frame->shared_frame == NULL) {
+    acquire_two_spt_locks(a, frame->owner->process);
+  } else {
+    acquire_multiple_spt_locks(a, &frame->shared_frame->owners);
+  }
+}
+
+static void release_frame_locks(struct thread *a, struct frame* frame) {
+  if (frame->shared_frame == NULL) {
+    release_two_spt_locks(a, frame->owner->process);
+  } else {
+    release_multiple_spt_locks(a, &frame->shared_frame->owners);
+  }
+}
+
 bool frame_accessed(struct frame *frame) {
   bool accessed = false;
   if (frame->shared_frame == NULL) {
@@ -484,22 +499,142 @@ void evict_frame(void) {
   lock_acquire(&eviction_lock);
 
   if (list_empty(&eviction_list)) {
-    printf("No frames to evict!\n");
-    exit_user_process(-1);
+    lock_release(&eviction_lock);
+    lock_release(&frame_table_lock);
+    exit_user_process(ERROR_STATUS_CODE);
   }
 
+  struct frame *frame_to_evict;
   // Find the frame to evict.
   while (true) {
     if (eviction_cursor == list_end(&eviction_list)) {
       eviction_cursor = list_begin(&eviction_list);
     }
 
-    struct frame *frame_to_evict = list_entry(
+    frame_to_evict = list_entry(
       eviction_cursor,
       struct frame,
       queue_elem
     );
 
-    // We need to check if there is a list of owners
+    // Grab all the owner locks! And also the shared_frame lock if needed.
+    acquire_frame_locks(thread_current(), frame_to_evict);
+    if (frame_to_evict->shared_frame != NULL) {
+      lock_acquire(&frame_to_evict->shared_frame->lock);
+    }
+
+    eviction_cursor = list_next(eviction_cursor);
+    if (!frame_accessed(frame_to_evict)) {
+      break;
+    }
+
+    if (frame_to_evict->shared_frame != NULL) {
+      lock_release(&frame_to_evict->shared_frame->lock);
+    }
+    release_frame_locks(thread_current(), frame_to_evict);
+  }
+
+  // Remove the frame_to_evict from the frame table and eviction list, avoiding
+  // any further interference.
+  hash_delete(&frame_table, &frame_to_evict->table_elem);
+  list_remove(&frame_to_evict->queue_elem);
+  lock_release(&eviction_lock);
+  lock_release(&frame_table_lock);
+
+  struct owner *owner = frame_to_evict->owner;
+  // Find an spt_entry if there exists one.
+  struct spt_entry entry_to_find;
+  entry_to_find.uvaddr = owner->uvaddr;
+
+  struct hash_elem *found_elem = hash_find(
+    &owner->process->spt,
+    &entry_to_find.elem
+  );
+
+  if (found_elem == NULL) {
+    // No spt_entry, so we swap out the frame and add the swap slot to the spt.
+    bool writable = pagedir_is_writable(owner->process->pagedir, owner->uvaddr);
+    pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
+    size_t swap_slot = swap_out(frame_to_evict->kvaddr);
+
+    struct spt_entry *new_entry = malloc(sizeof(struct spt_entry));
+    if (new_entry == NULL) {
+      PANIC("Kernel out of memory!");
+    }
+
+    new_entry->uvaddr = owner->uvaddr;
+    new_entry->type = SWAPPED;
+    new_entry->writable = writable;
+    new_entry->swap_slot = swap_slot;
+
+    hash_insert(&owner->process->spt, &new_entry->elem);
+    free(frame_to_evict);
+    lock_release(&owner->process->spt_lock);
+    free(owner);
+  } else {
+    struct spt_entry *found_entry = hash_entry(
+      found_elem,
+      struct spt_entry,
+      elem
+    );
+
+    switch (found_entry->type) {
+      case SWAPPED:
+        PANIC("We should not be able to evict a swapped out frame!\n");
+        break;
+      case UNINITIALISED_EXECUTABLE:
+        if (found_entry->writable) {
+          // Swap the data out, change the old spt entry, essentially replacing
+          // it with a swap slot entry.
+          pagedir_clear_page(owner->process->pagedir, owner->uvaddr);
+          size_t swap_slot = swap_out(frame_to_evict->kvaddr);
+          found_entry->type = SWAPPED;
+          found_entry->swap_slot = swap_slot;
+
+          free(frame_to_evict);
+          lock_release(&owner->process->spt_lock);
+          free(owner);
+        } else {
+          // We now have multiple owners to consider, so we must update all
+          // their page directories.
+          struct shared_frame *shared_frame = frame_to_evict->shared_frame;
+
+          // Clear all the page directories.
+          for (
+            struct list_elem *cur_elem = list_begin(&shared_frame->owners);
+            cur_elem != list_end(&shared_frame->owners);
+            cur_elem = list_next(cur_elem)
+          ) {
+            struct owner *cur_owner = list_entry(
+              cur_elem,
+              struct owner,
+              elem
+            );
+            pagedir_clear_page(cur_owner->process->pagedir, cur_owner->uvaddr);
+          }
+
+          shared_frame->frame = NULL;
+          palloc_free_page(frame_to_evict->kvaddr);
+          free(frame_to_evict);
+
+          lock_release(&shared_frame->lock);
+          release_multiple_spt_locks(thread_current(), &shared_frame->owners);
+        }
+        break;
+      case MMAP:
+        // This clears the page directory for us, and writes back to file.
+        mmap_flush_entry(found_entry, owner->process);
+
+        // Free up memory and free frame.
+        palloc_free_page(frame_to_evict->kvaddr);
+        free(frame_to_evict);
+
+        lock_release(&owner->process->spt_lock);
+        free(owner);
+        break;
+      default:
+        PANIC("Unrecognised spt_entry type!\n");
+        break;
+    }
   }
 }

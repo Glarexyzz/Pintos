@@ -1142,10 +1142,13 @@ setup_stack (void **esp)
   if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
+      if (success) {
+        unpin_page(PHYS_BASE - PGSIZE);
         *esp = PHYS_BASE;
-      else
-        user_free_page (kpage);
+      }
+      else {
+        user_free_page(kpage);
+      }
     }
   return success;
 }

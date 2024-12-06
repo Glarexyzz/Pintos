@@ -468,7 +468,7 @@ page_fault (struct intr_frame *f)
 
   if (!process_spt_entry(found_entry)) {
     lock_release(&cur->spt_lock);
-    // TODO: Unpin the page.
+    unpin_page(found_entry->uvaddr);
     goto fail;
   }
 
