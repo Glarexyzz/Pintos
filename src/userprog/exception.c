@@ -462,7 +462,10 @@ page_fault (struct intr_frame *f)
   );
 
   // Exit if writing to a read-only page
-  if (write && !found_entry->writable) goto fail;
+  if (write && !found_entry->writable) {
+    lock_release(&cur->spt_lock);
+    goto fail;
+  }
 
   if (!process_spt_entry(found_entry)) {
     lock_release(&cur->spt_lock);
