@@ -33,8 +33,8 @@ struct hash frame_table;
 struct lock frame_table_lock;
 
 void frame_table_init(void);
-struct frame *create_frame(enum palloc_flags flags);
-void *user_get_page(enum palloc_flags flags);
+struct frame *create_frame(enum palloc_flags flags, const void* uvaddr);
+void *user_get_page(enum palloc_flags flags, const void *uvaddr);
 void user_free_page(void *page);
 
 void eviction_list_init(void);

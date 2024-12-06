@@ -173,17 +173,17 @@ static bool stack_grow(struct intr_frame *f, const void *fault_addr) {
   if (!access_is_stack(f->esp, fault_addr)) {
     return false;
   }
+  // Try to map the address to the stack
+  uint32_t *pd = thread_current()->pagedir;
+  const void *aligned_addr = pg_round_down(fault_addr);
+
   // Attempt to allocate a stack page for the current process.
   // If allocation fails, return false to kill the process.
-  void *stack_page = user_get_page(0);
+  void *stack_page = user_get_page(0, aligned_addr);
   if (stack_page == NULL) {
     // Could not obtain a page for the stack.
     return false;
   }
-
-  // Try to map the address to the stack
-  uint32_t *pd = thread_current()->pagedir;
-  const void *aligned_addr = pg_round_down(fault_addr);
   ASSERT(pagedir_get_page(pd, aligned_addr) == NULL);
   if (!pagedir_set_page(pd, (void *)aligned_addr, stack_page, true)) {
     user_free_page(stack_page);
@@ -205,7 +205,7 @@ static bool load_writable_executable(struct spt_entry *spt_entry) {
   int offset = spt_entry->writable_exec_file.offset;
 
   lock_release(&thread_current()->spt_lock);
-  uint8_t *kpage = user_get_page(0);
+  uint8_t *kpage = user_get_page(0, spt_entry->uvaddr);
   lock_acquire(&thread_current()->spt_lock);
 
   // Read the executable file into memory.
@@ -245,7 +245,7 @@ static bool load_shared_executable(struct spt_entry *spt_entry) {
   struct shared_frame *shared_frame = spt_entry->shared_exec_file.shared_frame;
 
   // We must allocate a frame to put in shared_frame.
-  struct frame *new_frame = create_frame(0);
+  struct frame *new_frame = create_frame(0, spt_entry->uvaddr);
   uint8_t *kpage = new_frame->kvaddr;
 
   // Read the executable file into memory.
@@ -340,8 +340,9 @@ static bool load_swapped_page(struct spt_entry *spt_entry) {
   struct thread *cur = thread_current();
   lock_release(&cur->spt_lock);
 
-  void *kpage = user_get_page(0);
+  void *kpage = user_get_page(0, spt_entry->uvaddr); // TODO: unpin?
   swap_in(kpage, spt_entry->swap_slot); // TODO: Does it matter if kvaddr or uvaddr?
+
   if (!pagedir_set_page(
       cur->pagedir,
       spt_entry->uvaddr,
@@ -375,8 +376,6 @@ static bool load_swapped_page(struct spt_entry *spt_entry) {
  * @return `true` iff loading the page was successful.
  */
 bool process_spt_entry(struct spt_entry *entry) {
-  struct lock *spt_lock = &thread_current()->spt_lock;
-
   switch (entry->type) {
     case UNINITIALISED_EXECUTABLE:
       return load_uninitialised_executable(entry);

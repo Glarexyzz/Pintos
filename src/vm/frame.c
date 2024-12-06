@@ -78,7 +78,7 @@ void frame_table_init() {
  * @return The new frame.
  * @remark Does not update the frame table.
  */
-struct frame *create_frame(enum palloc_flags flags) {
+struct frame *create_frame(enum palloc_flags flags, const void *uvaddr) {
   struct thread *cur_thread = thread_current();
   ASSERT(cur_thread->is_user);
 
@@ -105,7 +105,7 @@ struct frame *create_frame(enum palloc_flags flags) {
   // TODO: Free appropriately in evict and user_free_page!
 
   owner->process = cur_thread;
-  // TODO: Add uvaddr!
+  owner->uvaddr = uvaddr;
 
   new_frame->owner = owner;
   new_frame->shared_frame = NULL;
@@ -120,8 +120,8 @@ struct frame *create_frame(enum palloc_flags flags) {
  * @pre The caller is a user process.
  * @remark Updates the frame table.
  */
-void *user_get_page(enum palloc_flags flags) {
-  struct frame *new_frame = create_frame(flags);
+void *user_get_page(enum palloc_flags flags, const void *uvaddr) {
+  struct frame *new_frame = create_frame(flags, uvaddr);
 //  printf("Attempting to insert %p to frame table\n", new_frame);
 
   // Insert the page into the page table

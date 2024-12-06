@@ -321,7 +321,7 @@ bool mmap_load_entry(struct spt_entry *entry) {
   // Attempt to add to the page directory as rewritable, so that we can
   // manipulate the frame.
   lock_release(&thread_current()->spt_lock);
-  void *frame = user_get_page(0);
+  void *frame = user_get_page(0, entry->uvaddr);
   lock_acquire(&thread_current()->spt_lock);
 
   if (!pagedir_set_page(pagedir, entry->uvaddr, frame, true)) {
