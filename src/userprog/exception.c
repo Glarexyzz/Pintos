@@ -14,7 +14,6 @@
 #include "threads/vaddr.h"
 #include "vm/frame.h"
 #include "vm/mmap.h"
-#include "vm/page.h"
 
 /// The number of bytes written to the stack in a PUSH instruction.
 #define PUSH_SIZE 4
@@ -375,7 +374,7 @@ static bool load_swapped_page(struct spt_entry *spt_entry) {
  * @param entry The spt_entry to be handled.
  * @return `true` iff loading the page was successful.
  */
-static bool process_spt_entry(struct spt_entry *entry) {
+bool process_spt_entry(struct spt_entry *entry) {
   struct lock *spt_lock = &thread_current()->spt_lock;
 
   switch (entry->type) {
@@ -385,6 +384,8 @@ static bool process_spt_entry(struct spt_entry *entry) {
       return mmap_load_entry(entry);
     case SWAPPED:
       return load_swapped_page(entry);
+    default:
+      PANIC("Unrecognised spt_entry type!\n");
   }
 }
 
@@ -465,6 +466,7 @@ page_fault (struct intr_frame *f)
 
   if (!process_spt_entry(found_entry)) {
     lock_release(&cur->spt_lock);
+    // TODO: Unpin the page.
     goto fail;
   }
 
