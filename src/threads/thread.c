@@ -797,10 +797,6 @@ init_thread (struct thread *t, const char *name, int priority)
   t->is_user = false;
 #endif
 
-#ifdef VM
-  lock_init(&t->spt_lock);
-#endif
-
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();

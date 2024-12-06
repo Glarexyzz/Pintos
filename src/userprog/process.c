@@ -398,6 +398,7 @@ start_process (void *aux_)
   bool success;
 
   thread_current()->is_user = true;
+  lock_init(&thread_current()->spt_lock);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
