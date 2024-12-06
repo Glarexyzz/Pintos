@@ -249,7 +249,7 @@ void pin_page(void *uvaddr) {
       elem
     );
 
-    // This will load the page into memory, without pinning it.
+    // This will load the page into memory, pinning it.
     bool success = process_spt_entry(found_entry);
 
     // For debugging.
