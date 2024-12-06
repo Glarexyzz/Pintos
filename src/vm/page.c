@@ -1,4 +1,6 @@
+#include <hash.h>
 #include <list.h>
+#include <stdio.h>
 #include "devices/swap.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
@@ -33,58 +35,40 @@ bool spt_entry_kvaddr_smaller(
   return a_uvaddr < b_uvaddr;
 }
 
-void spt_destroy(void) {
-  // TODO
-}
-
 static void free_uninitialised_executable(struct spt_entry *entry) {
-  // TODO: Add synchronisation.
-  void *kvaddr = pagedir_get_page(thread_current()->pagedir, entry->uvaddr);
+  // Nothing to do if the entry is writable except freeing the spt_entry,
+  // which will happen in free_spt_entry()
+  if (entry->writable) return;
 
-  if (entry->writable) {
-    // The file might be in memory, so we must check that first.
-    if (kvaddr != NULL) {
-      // The file is in memory, so we must remove it from the frame table and
-      // invalidate the pagedir entry.
-      user_free_page(kvaddr);
-      /*pagedir_clear_page(thread_current()->pagedir, entry->uvaddr);
+  // Otherwise, we have a shared frame and we need to remove ourselves as an
+  // owner.
+  struct shared_frame *shared_frame = entry->shared_exec_file.shared_frame;
 
-      struct frame frame_to_find;
-      frame_to_find.kvaddr = kvaddr;
+  lock_acquire(&share_table_lock);
+  lock_acquire(&shared_frame->lock);
+  shared_frame_delete_owner(shared_frame, thread_current());
 
-      struct hash_elem *found_elem = hash_find(
-          &frame_table,
-          &frame_to_find.table_elem
-      );
-      ASSERT(found_elem != NULL); // TODO: can the frame get removed by the time we find it (e.g. by eviction?)
+  if (list_empty(&shared_frame->owners)) {
+    // Free the shared frame.
+    hash_delete(
+      &share_table,
+      &shared_frame->elem
+    );
+    close_shared_file(shared_frame->file);
 
-      struct frame *found_frame = hash_entry(
-          found_elem,
-      struct frame,
-      table_elem
-      );
-
-      // Remove from frame table, eviction list, and free resources.
-      hash_delete(&frame_table, &found_frame->table_elem);
-      list_remove(&found_frame->queue_elem);
-      free(found_frame->owner);
-      free(found_frame);
-      // TODO: Perhaps replace with user_free_page?*/
-    }
-
+    lock_release(&share_table_lock);
+    lock_release(&shared_frame->lock);
+    free(shared_frame);
   } else {
-    if (kvaddr != NULL) {
-      user_free_page(kvaddr);
-    }
+    lock_release(&share_table_lock);
+    lock_release(&shared_frame->lock);
   }
-  free(entry);
 }
 
 static void free_spt_entry(
   struct hash_elem *cur_elem,
   void *aux UNUSED
 ) {
-  // TODO: Add synchronisation!
   struct spt_entry *cur_entry = hash_entry(
     cur_elem,
     struct spt_entry,
@@ -100,7 +84,21 @@ static void free_spt_entry(
     case UNINITIALISED_EXECUTABLE:
       free_uninitialised_executable(cur_entry);
       break;
+    case MMAP:
+      PANIC("Memory mapped files should have already been freed!\n");
+      break;
     default:
+      PANIC("Unrecognised spt_entry type!\n");
       break;
   }
+  free(cur_entry);
+}
+
+/**
+ * Destroys the current thread's SPT, freeing resources as appropriate.
+ * @pre Both mmap_destroy() and pagedir_destroy() have already been called for
+ * this thread.
+ */
+void spt_destroy(void) {
+  hash_destroy(&thread_current()->spt, &free_spt_entry);
 }

@@ -64,5 +64,6 @@ bool spt_entry_kvaddr_smaller(
   const struct hash_elem *b,
   void *aux UNUSED
 );
+void spt_destroy(void);
 
 #endif //VM_PAGE_H

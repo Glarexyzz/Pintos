@@ -593,9 +593,6 @@ void exit_user_process(int status) {
 
   lock_release(&user_processes_lock);
 
-  // Destroy the supplemental page table.
-  // TODO:
-
   // Destroy the memory-mapped file table.
   mmap_destroy();
 
@@ -680,6 +677,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  // Destroy the supplemental page table.
+  spt_destroy();
 }
 
 /* Sets up the CPU for running user code in the current

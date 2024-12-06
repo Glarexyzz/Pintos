@@ -241,7 +241,7 @@ void shared_frame_delete_owner(
   }
 
   // Element to delete not found, so we panic.
-  PANIC("Can't delete an owner that isn't in the shared_frame!");
+  PANIC("Can't delete an owner that isn't in the shared_frame!\n");
 }
 
 
