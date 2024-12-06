@@ -398,6 +398,7 @@ start_process (void *aux_)
   bool success;
 
   thread_current()->is_user = true;
+  lock_init(&thread_current()->spt_lock);
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -676,6 +677,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+
+  // Destroy the supplemental page table.
+  spt_destroy();
 }
 
 /* Sets up the CPU for running user code in the current
@@ -1014,10 +1018,12 @@ static bool load_segment (
       // Remove entry from SPT if it already exists
       struct spt_entry entry_to_find;
       entry_to_find.uvaddr = upage;
+      lock_acquire(&t->spt_lock);
       struct hash_elem *found_elem = hash_find(&t->spt, &entry_to_find.elem);
       if (found_elem != NULL) {
         hash_delete(&t->spt, found_elem);
       }
+      lock_release(&t->spt_lock);
 
       // Construct the element to insert into the SPT.
       struct spt_entry *entry = malloc(sizeof(struct spt_entry));
@@ -1056,7 +1062,7 @@ static bool load_segment (
           // Use the entry and add ourselves as an owner
           lock_acquire(&found_shared_frame->lock);
           entry->shared_exec_file.shared_frame = found_shared_frame;
-          shared_frame_add_owner(found_shared_frame, t);
+          shared_frame_add_owner(found_shared_frame, t, upage);
           lock_release(&found_shared_frame->lock);
 
         } else {
@@ -1076,7 +1082,7 @@ static bool load_segment (
           lock_init(&shared_frame->lock);
 
           // Add caller as an owner of the shared frame
-          shared_frame_add_owner(shared_frame, t);
+          shared_frame_add_owner(shared_frame, t, upage);
 
           // Set the file and offset of the shared frame
           shared_frame->offset = ofs;
@@ -1111,7 +1117,9 @@ static bool load_segment (
         entry->writable_exec_file.offset = ofs;
       }
 
+      lock_acquire(&t->spt_lock);
       hash_insert(&t->spt, &entry->elem);
+      lock_release(&t->spt_lock);
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -1130,14 +1138,17 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = user_get_page(PAL_ZERO);
+  kpage = user_get_page(PAL_ZERO, PHYS_BASE - PGSIZE);
   if (kpage != NULL)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
+      if (success) {
+        unpin_page(PHYS_BASE - PGSIZE);
         *esp = PHYS_BASE;
-      else
-        user_free_page (kpage);
+      }
+      else {
+        user_free_page(kpage);
+      }
     }
   return success;
 }

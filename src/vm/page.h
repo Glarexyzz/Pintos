@@ -4,8 +4,8 @@
 #include <debug.h>
 #include <hash.h>
 #include "filesys/file.h"
-#include "vm/frame.h"
 #include "filesys/off_t.h"
+#include "vm/frame.h"
 #include "vm/mmap.h"
 
 /// spt_entry data for a read-only uninitialised executable.
@@ -36,6 +36,7 @@ struct memory_mapped_file {
 
 /// Describes where the data referred to by the SPT is located.
 enum spt_entry_type {
+  SWAPPED,
   UNINITIALISED_EXECUTABLE,
   MMAP, // A page mapped to a part of a file in the user's address space.
 };
@@ -47,6 +48,7 @@ struct spt_entry {
                              * union. */
   bool writable;            /* Whether the page is writable. */
   union {                   /* The spt_entry_type-specific data. */
+    size_t swap_slot;
     struct uninitialised_executable shared_exec_file;
     struct writable_executable writable_exec_file;
     struct memory_mapped_file mmap;
@@ -62,5 +64,6 @@ bool spt_entry_kvaddr_smaller(
   const struct hash_elem *b,
   void *aux UNUSED
 );
+void spt_destroy(void);
 
 #endif //VM_PAGE_H

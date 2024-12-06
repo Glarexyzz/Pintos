@@ -124,6 +124,7 @@ main (void)
 
 #ifdef VM
   frame_table_init();
+  eviction_list_init();
   share_table_init();
 #endif
 

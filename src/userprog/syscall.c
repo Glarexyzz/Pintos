@@ -14,6 +14,7 @@
 #include "threads/synch.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "vm/frame.h"
 #include "vm/mmap.h"
 
 /// The maximum number of bytes to write to the console at a time
@@ -359,9 +360,12 @@ static void page_console_read(void *page_, unsigned size, void *state UNUSED) {
 static void page_file_read(void *page, unsigned size, void *state_) {
   struct file_read_state *state = (struct file_read_state *)state_;
   if (state->eof_reached) return;
+
+  //pin_page(page);
   lock_acquire(&file_system_lock);
   unsigned bytes_read = file_read(state->file, page, size);
   lock_release(&file_system_lock);
+  //unpin_page(page);
   if (bytes_read < size) {
     // The buffer has not been fully written to, indicating we are at the
     // end of the file.
@@ -380,9 +384,11 @@ static void page_file_read(void *page, unsigned size, void *state_) {
  */
 static void page_file_write(void *page, unsigned size, void *state_) {
   struct file_write_state *state = (struct file_write_state *)state_;
+  //pin_page(page);
   lock_acquire(&file_system_lock);
   state->bytes_written += (unsigned)file_write(state->file, page, size);
   lock_release(&file_system_lock);
+  //unpin_page(page);
 }
 
 /**
