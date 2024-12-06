@@ -5,12 +5,7 @@
 #include "threads/malloc.h"
 #include "userprog/process.h"
 #include "vm/share.h"
-
-/// The item to be inserted into the shared_frame struct's owners list
-struct owner {
-  struct thread *process; /* The thread/process which owns a page */
-  struct list_elem elem;  /* For insertion into the frame's owner list */
-};
+#include "vm/page.h"
 
 /// A file shared between multiple processes
 struct shared_file {
@@ -196,13 +191,15 @@ static bool shared_frame_owner_smaller(
  */
 void shared_frame_add_owner(
   struct shared_frame *shared_frame,
-  struct thread *t
+  struct thread *t,
+  void *uvaddr
 ) {
   struct owner *owner = malloc(sizeof(struct owner));
   if (owner == NULL) {
     PANIC("Kernel out of memory!");
   }
   owner->process = t;
+  owner->uvaddr = uvaddr;
 
   list_insert_ordered(
     &shared_frame->owners,
@@ -217,6 +214,7 @@ void shared_frame_add_owner(
  * @param shared_frame The shared_frame.
  * @param t The thread to be deleted as an owner.
  * @pre The share_table_lock is owned by the caller.
+ * @pre The thread's SPT lock is owned by the caller.
  * @remark The function will panic if it tries to delete an owner that isn't in
  * the shared_frame.
  */
@@ -235,6 +233,16 @@ void shared_frame_delete_owner(
 
       // Remove the thread from the frame's owners
       list_remove(cur_elem);
+
+      // Remove the SPT entry from the frame's owners
+      struct spt_entry entry_to_find;
+      entry_to_find.uvaddr = cur_owner->uvaddr;
+
+      struct hash_elem *found_elem = hash_delete(
+        &t->spt,
+        &entry_to_find.elem
+      );
+
       free(cur_owner);
       return;
     }

@@ -20,7 +20,8 @@ struct shared_frame {
 void share_table_init(void);
 void shared_frame_add_owner(
   struct shared_frame *shared_frame,
-  struct thread *t
+  struct thread *t,
+  void *uvaddr
 );
 void shared_frame_delete_owner(
   struct shared_frame *shared_frame,

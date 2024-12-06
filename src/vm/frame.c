@@ -174,6 +174,7 @@ void user_free_page(void *page) {
     struct shared_frame *shared_frame = found_frame->shared_frame;
 
     // Frame is shared, so we must remove ourselves as an owner.
+    lock_acquire(&cur_thread->spt_lock);
     lock_acquire(&share_table_lock);
     lock_acquire(&shared_frame->lock);
     shared_frame_delete_owner(shared_frame, cur_thread);
@@ -195,6 +196,7 @@ void user_free_page(void *page) {
       palloc_free_page(page);
       lock_release(&shared_frame->lock);
       lock_release(&share_table_lock);
+      lock_release(&cur_thread->spt_lock);
       free(shared_frame);
 
       delete_frame = true;
@@ -202,6 +204,7 @@ void user_free_page(void *page) {
       // The shared_frame still has owners.
       lock_release(&shared_frame->lock);
       lock_release(&share_table_lock);
+      lock_release(&cur_thread->spt_lock);
     }
   }
 

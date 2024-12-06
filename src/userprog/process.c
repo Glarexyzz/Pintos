@@ -1062,7 +1062,7 @@ static bool load_segment (
           // Use the entry and add ourselves as an owner
           lock_acquire(&found_shared_frame->lock);
           entry->shared_exec_file.shared_frame = found_shared_frame;
-          shared_frame_add_owner(found_shared_frame, t);
+          shared_frame_add_owner(found_shared_frame, t, upage);
           lock_release(&found_shared_frame->lock);
 
         } else {
@@ -1082,7 +1082,7 @@ static bool load_segment (
           lock_init(&shared_frame->lock);
 
           // Add caller as an owner of the shared frame
-          shared_frame_add_owner(shared_frame, t);
+          shared_frame_add_owner(shared_frame, t, upage);
 
           // Set the file and offset of the shared frame
           shared_frame->offset = ofs;

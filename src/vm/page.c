@@ -47,22 +47,9 @@ static void free_uninitialised_executable(struct spt_entry *entry) {
   lock_acquire(&share_table_lock);
   lock_acquire(&shared_frame->lock);
   shared_frame_delete_owner(shared_frame, thread_current());
+  lock_release(&share_table_lock);
+  lock_release(&shared_frame->lock);
 
-  if (list_empty(&shared_frame->owners)) {
-    // Free the shared frame.
-    hash_delete(
-      &share_table,
-      &shared_frame->elem
-    );
-    close_shared_file(shared_frame->file);
-
-    lock_release(&share_table_lock);
-    lock_release(&shared_frame->lock);
-    free(shared_frame);
-  } else {
-    lock_release(&share_table_lock);
-    lock_release(&shared_frame->lock);
-  }
 }
 
 static void free_spt_entry(
