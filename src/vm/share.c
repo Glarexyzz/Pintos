@@ -234,14 +234,16 @@ void shared_frame_delete_owner(
       // Remove the thread from the frame's owners
       list_remove(cur_elem);
 
-      // Remove the SPT entry from the frame's owners
+      // Remove the SPT entry from the frame's owners, if it exists
       struct spt_entry entry_to_find;
       entry_to_find.uvaddr = cur_owner->uvaddr;
 
-      struct hash_elem *found_elem = hash_delete(
-        &t->spt,
-        &entry_to_find.elem
-      );
+      struct hash_elem *found_elem = hash_delete(&t->spt, &entry_to_find.elem);
+      struct spt_entry *found_entry = (found_elem == NULL) ? NULL
+        : hash_entry(found_elem, struct spt_entry, elem);
+      free(found_entry);
+
+
 
       free(cur_owner);
       return;
